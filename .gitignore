@@ -1,0 +1,28 @@
+# Dependencies
+/node_modules/
+
+# Next.js output
+/.next/
+/out/
+
+# Local environment files; keep the credential-free template
+.env*
+!.env.example
+
+# Logs and TypeScript cache
+*.log
+*.tsbuildinfo
+
+# Hosting and temporary files
+/.vercel/
+/.tmp/
+
+# Test artifacts
+/coverage/
+/playwright-report/
+/test-results/
+/blob-report/
+
+# Operating system files
+.DS_Store
+Thumbs.db
