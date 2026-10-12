@@ -3,6 +3,8 @@ import { ArrowUpRight, ChartNoAxesCombined, ChevronDown, LockKeyhole, Menu, Shie
 
 import { ModeStatus } from "@/components/layout/mode-status";
 import { Navigation } from "@/components/layout/navigation";
+import { LogoutButton } from "@/components/auth/logout-button";
+import { SessionSync } from "@/components/auth/session-sync";
 
 function Brand() {
   return (
@@ -18,6 +20,7 @@ function Brand() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-dvh">
+      <SessionSync />
       <a href="#main-content" className="sr-only z-50 rounded-md bg-primary p-3 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3">
         Skip to content
       </a>
@@ -44,7 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
             <div className="lg:hidden"><Brand /></div>
             <p className="hidden text-sm text-muted-foreground lg:block">Personal workspace <span className="mx-2 text-border">/</span> <span className="font-medium text-foreground">Virtual portfolio</span></p>
-            <ModeStatus />
+            <div className="flex flex-wrap items-center gap-2"><ModeStatus /><LogoutButton /></div>
           </div>
           <details className="mx-auto mt-4 max-w-7xl border-t pt-3 lg:hidden">
             <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">

@@ -3,6 +3,9 @@
 
 # Next.js output
 /.next/
+/.next-e2e/
+/supabase/.temp/
+/supabase/.branches/
 /out/
 
 # Local environment files; keep the credential-free template
