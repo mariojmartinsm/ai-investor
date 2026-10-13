@@ -9,6 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
+    "test:concurrency": "node tests/database/concurrency.mjs",
     "test:e2e": "playwright test"
   },
   "engines": {
@@ -20,6 +21,7 @@
     "@supabase/supabase-js": "2.117.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "decimal.js": "10.6.0",
     "lucide-react": "^0.577.0",
     "next": "16.4.0",
     "radix-ui": "^1.7.0",

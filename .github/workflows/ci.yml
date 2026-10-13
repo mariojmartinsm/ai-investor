@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Lint, types, tests and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+
+      - name: Locate native PostgreSQL binaries
+        shell: bash
+        run: |
+          pg_test_bin="$(pg_config --bindir)"
+          for executable in initdb pg_ctl psql; do
+            test -x "$pg_test_bin/$executable"
+          done
+          echo "PG_TEST_BIN=$pg_test_bin" >> "$GITHUB_ENV"
+
+      - name: Install Playwright Chromium and system dependencies
+        run: npx playwright install chromium --with-deps
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and SQL security tests
+        run: npm test
+
+      # This runner creates and removes its own cluster. It does not start the
+      # runner's PostgreSQL service or connect to a hosted application database.
+      - name: Native PostgreSQL concurrency and atomicity tests
+        run: npm run test:concurrency
+
+      # The E2E runner provides loopback Auth and disposable ledger fixtures.
+      # No Supabase credentials, hosted users or financial records are used.
+      - name: Browser authentication and portfolio tests
+        run: npm run test:e2e
+
+      - name: Production build
+        run: npm run build

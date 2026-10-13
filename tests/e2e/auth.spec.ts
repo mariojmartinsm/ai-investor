@@ -30,6 +30,11 @@ async function login(page: Page, next = "/dashboard") {
   await expect(page).toHaveURL(new RegExp(`${next}$`));
 }
 
+test.beforeEach(async ({ request }) => {
+  const result = await request.post(`${authURL}/__test/portfolio/reset`);
+  expect(result.ok()).toBeTruthy();
+});
+
 test("all application pages redirect logged-out visitors without exposing portfolio content", async ({ request, page }) => {
   for (const path of protectedPaths) {
     const result = await request.get(path, { maxRedirects: 0 });
@@ -64,8 +69,10 @@ test("login, all private pages, reload and a second tab preserve an authenticate
     await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
   }
   await page.goto("/dashboard");
+  await expect(page.getByRole("button", { name: "Initialize virtual portfolio", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Initialize virtual portfolio", exact: true }).click();
   await expect(page.getByText("Virtual portfolio value", { exact: true })).toBeVisible();
-  await expect(page.getByText("€500.00", { exact: true }).first()).toBeVisible();
+  await expect(page.getByTestId("portfolio-total")).toHaveText("€500.00");
   await page.reload();
   await expect(page).toHaveURL(/\/dashboard$/);
   const secondTab = await context.newPage();

@@ -56,7 +56,9 @@ beforeAll(async () => {
     new URL("../../supabase/migrations/", import.meta.url),
   );
   const migrations = (await readdir(directory))
-    .filter((name) => name.endsWith(".sql"))
+    // Preserve foundation constraint coverage independently of later immutable
+    // ledger triggers; all-migration compatibility is covered by initialization.
+    .filter((name) => name.endsWith("_ai_002_auth_database_foundation.sql"))
     .sort();
   expect(migrations.length).toBeGreaterThan(0);
   for (const migration of migrations) {
