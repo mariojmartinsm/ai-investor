@@ -213,8 +213,8 @@ test("mobile persisted portfolio fits the viewport and retains locked Live mode"
   await page.getByRole("button", { name: "Initialize virtual portfolio", exact: true }).click();
   await expectBalances(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await expect(page.getByText("Latest Agent Activity", { exact: true })).toBeVisible();
-  await expect(page.getByText("Not yet configured", { exact: true })).toBeVisible();
+  await expect(page.getByText("Strategy Analysis", { exact: true })).toBeVisible();
+  await expect(page.getByText("Analysis only", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /buy|sell|trade|enable live/i })).toHaveCount(0);
   await page.screenshot({ path: ".tmp/e2e-mobile-portfolio-ready.png", fullPage: true, style: "nextjs-portal { display: none !important; }" });
   await page.getByRole("link", { name: "About locked Live mode", exact: true }).click();

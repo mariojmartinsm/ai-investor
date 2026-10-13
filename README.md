@@ -2,7 +2,7 @@
 
 AI Investor is a private Dry Run-only investment dashboard for a virtual EUR, BTC and ETH portfolio. It uses Next.js 16 App Router, strict TypeScript, Tailwind CSS, shadcn/ui and Supabase Auth.
 
-**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. **M2 adds read-only public BTC-EUR and ETH-EUR current quotes, persistent daily history, market charts and timestamped portfolio valuation**. Live mode remains locked and unavailable; the agent is not configured.
+**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. **M2 adds read-only public BTC-EUR and ETH-EUR current quotes, persistent daily history, market charts and timestamped portfolio valuation. M3 Phase 1 adds deterministic technical analysis and preview-only BUY/SELL/HOLD candidates.** Live mode remains locked and unavailable.
 
 ## Local setup
 
@@ -171,6 +171,28 @@ idempotent reference storage with authenticated reads and service-role-only
 inserts. See [M2 portfolio valuation acceptance](docs/M2_PORTFOLIO_VALUATION_ACCEPTANCE.md)
 for the deterministic price policy, security model and deployment procedure.
 
+## Strategy analysis: FR-031, FR-032, FR-033, initial FR-036 and partial FR-037
+
+The authenticated `/agent` workspace runs `BASELINE_V1` on the newest completed
+UTC daily candles already stored in Supabase. It uses a fixed maximum of 90
+contiguous candles and requires at least 60. All authoritative calculations use
+`decimal.js`: SMA20, SMA50, Wilder RSI14, seven- and 30-day close momentum, and
+the sample standard deviation of the latest 30 close-to-close returns,
+annualised by `sqrt(365)`.
+
+SELL candidates are evaluated before BUY. BUY requires close and SMA20 above
+SMA50 with inclusive RSI14 bounds of 40 through 65. SELL requires close and
+SMA20 below SMA50 plus a positive owned quantity. Every other result is HOLD,
+including insufficient, gapped, malformed or stale history. Proposed EUR 25
+BUY notionals and 25% SELL quantities are informational only.
+
+Migration `20261013220809_ai_007_strategy_analysis_runs.sql` stores immutable,
+owner-scoped `ANALYSIS_ONLY` previews with deterministic daily idempotency keys,
+indicator inputs, cutoff, reason codes, source, strategy/calculation versions,
+and explicit `NOT_REQUESTED` AI and `NOT_EVALUATED` risk states. Browser roles
+cannot write the table, and the server-only append function cannot update the
+portfolio or ledger. See [M3 strategy acceptance](docs/M3_STRATEGY_ANALYSIS_ACCEPTANCE.md).
+
 ## Login and session behavior
 
 Use `/login` with the manually provisioned email/password. Invalid credentials show a generic message. Login destinations are restricted to the seven workspace routes; supplied external URLs are ignored. Use **Log out** in the application header to end the current browser session.
@@ -248,6 +270,7 @@ components/     Responsive shell, shared UI, auth/session components
 lib/auth/       Verified-user guard, safe redirects and logout action
 lib/portfolio/  Owner-scoped balances, decimal-safe portfolio valuation and formatting
 lib/markets/    Public Coinbase current/history adapters, persisted references, validation and cache
+lib/strategy/   Pure indicators, deterministic candidates and protected preview persistence
 lib/supabase/   Browser/server clients, server-only admin client and proxy session refresh
 proxy.ts        Next.js 16 auth-refresh entry point
 supabase/       CLI config and version-controlled database migrations
@@ -270,9 +293,9 @@ After merging, return to `main`, run `git pull --ff-only origin main`, verify a 
 
 ## Current scope
 
-Authentication, the ledger-backed portfolio, timestamped market valuation, read-only current Coinbase quotes, persisted reference observations, validated daily history and closing-price charts are implemented. Agent, Trades, Performance and Settings remain placeholders. There is no AI analysis, scheduling, BUY/SELL functionality, browser secret-key client, live execution path or application deployment in the current scope.
+Authentication, the ledger-backed portfolio, timestamped market valuation, read-only current Coinbase quotes, persisted reference observations, validated daily history, market charts and preview-only deterministic strategy analysis are implemented. Trades, Performance and Settings remain placeholders. There is no AI review, risk approval, scheduling, order execution, browser secret-key client, live execution path or application deployment in the current scope.
 
-M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. M2 Phase 1 covers **FR-020 and partial FR-022/FR-024**, corresponding to AI-020. M2 Phase 2 covers **FR-021, remaining FR-022 candle validation, FR-025 and the market-price chart scope of FR-053**, corresponding to AI-021. M2 Phase 3 covers **FR-012, FR-023, remaining FR-011 valuation and initial FR-050**, corresponding to AI-022 through AI-024. Simulated execution and trading-strategy work remain pending.
+M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. M2 Phase 1 covers **FR-020 and partial FR-022/FR-024**, corresponding to AI-020. M2 Phase 2 covers **FR-021, remaining FR-022 candle validation, FR-025 and the market-price chart scope of FR-053**, corresponding to AI-021. M2 Phase 3 covers **FR-012, FR-023, remaining FR-011 valuation and initial FR-050**, corresponding to AI-022 through AI-024. M3 Phase 1 covers **FR-031, FR-032, FR-033, initial FR-036 and preview-only FR-037**, corresponding to AI-030 and AI-031. Risk controls, AI review and simulated execution remain pending.
 
 ## Troubleshooting
 
@@ -285,6 +308,7 @@ M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the or
 - **Stale market data:** retrieval or known last-trade age reached 120 seconds. Keep the tab visible for polling or refresh after the server cooldown. A reference price with unknown exchange time remains labeled as such; it is not evidence of an executable quote.
 - **Historical refresh unavailable:** confirm `SUPABASE_SECRET_KEY` (or the legacy service-role key) is configured only on the server and AI-004 is applied. Retry after provider cooldown. Inspect the owner-scoped import audit and visible gap count; never insert a fabricated candle to hide an upstream gap.
 - **Portfolio valuation unavailable:** a nonzero BTC/ETH holding lacks a fresh validated persisted mark. Check Coinbase connectivity, the server-only Supabase secret and AI-006. Do not substitute a stale price, zero or fabricated spread.
+- **Strategy analysis unavailable:** initialize the Dry Run portfolio, verify AI-004/AI-005 history and AI-007 are applied, then refresh daily history. Missing, stale, malformed or gapped inputs intentionally produce HOLD rather than a candidate order.
 - **Denied table reads/writes:** apply the migration, sign in and use the user's own portfolio. Financial writes are intentionally denied from browser roles. Do not weaken RLS or add service keys to resolve this.
 - **CLI access error:** ensure the CLI can access its user configuration directory and the selected project's database; never print credential-bearing connection strings in logs.
 - **Browser executable missing:** run `npx playwright install chromium`. The database/unit suite needs no browser or Docker.

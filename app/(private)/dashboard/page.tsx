@@ -42,10 +42,10 @@ export default async function DashboardPage() {
       <div className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
         <Card className="gap-0 shadow-none">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b pb-5">
-            <div><CardTitle className="text-base">Latest Agent Activity</CardTitle><CardDescription className="mt-1">Future decisions will appear here.</CardDescription></div>
-            <Badge variant="secondary">Not yet configured</Badge>
+            <div><CardTitle className="text-base">Strategy Analysis</CardTitle><CardDescription className="mt-1">Run a deterministic preview from completed daily candles.</CardDescription></div>
+            <Badge variant="secondary">Analysis only</Badge>
           </CardHeader>
-          <CardContent><EmptyState icon={Bot} title="Your agent is waiting in the wings" description="The AI agent is not yet configured. There are no analyses, scheduled runs, or trades to display." /></CardContent>
+          <CardContent className="space-y-4"><EmptyState icon={Bot} title="Preview the baseline strategy" description="Review BTC and ETH indicators and BUY, SELL or HOLD candidates. No orders execute and AI review is not active." /><Button variant="outline" asChild><Link href="/agent">Open strategy analysis <ArrowRight aria-hidden="true" className="size-4" /></Link></Button></CardContent>
         </Card>
 
         <Card className="shadow-none">
