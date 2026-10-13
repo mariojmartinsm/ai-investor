@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { createCoinbaseMarketAdapter } from "@/lib/markets/adapter";
+import { createCoinbaseHistoryAdapter } from "@/lib/markets/history/adapter";
 import { MARKET_PRODUCTS } from "@/lib/markets/types";
 
 // Opt-in only: public GET requests, no database, API keys, accounts or orders.
@@ -28,4 +29,24 @@ it("reads valid public BTC-EUR and ETH-EUR snapshots from Coinbase", async () =>
     if (snapshot.quote?.exchangeAt !== null) expect(Number.isFinite(Date.parse(snapshot.quote!.exchangeAt!))).toBe(true);
   }
   expect(requests.length).toBeGreaterThanOrEqual(4);
+}, 40_000);
+
+it("reads fully closed public daily candles without Coinbase credentials", async () => {
+  const requests: string[] = [];
+  const adapter = createCoinbaseHistoryAdapter({
+    fetcher: (input, options) => {
+      const url = String(input);
+      expect(url).toMatch(/^https:\/\/api\.coinbase\.com\/api\/v3\/brokerage\/market\/products\/(?:BTC|ETH)-EUR\/candles\?/);
+      expect(new Headers(options?.headers).has("Authorization")).toBe(false);
+      requests.push(url);
+      return fetch(input, options);
+    },
+  });
+  const results = await Promise.all(MARKET_PRODUCTS.map((product) => adapter.get(product, 3)));
+  for (const result of results) {
+    expect(result.candles).toHaveLength(3);
+    expect(result.complete).toBe(true);
+    expect(result.candles.every((candle) => Date.parse(candle.candleStart) < Date.now())).toBe(true);
+  }
+  expect(requests).toHaveLength(2);
 }, 40_000);

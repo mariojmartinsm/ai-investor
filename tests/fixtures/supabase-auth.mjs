@@ -8,6 +8,7 @@ import { PGlite } from "@electric-sql/pglite";
 export const TEST_EMAIL = "owner@example.test";
 export const TEST_PASSWORD = "fixture-password-only";
 export const TEST_PUBLISHABLE_KEY = "sb_publishable_auth_e2e_fixture";
+export const TEST_SECRET_KEY = "test-service-role-key-for-local-fixtures";
 
 const ownerId = "a1111111-1111-4111-8111-111111111111";
 const otherOwnerId = "b2222222-2222-4222-8222-222222222222";
@@ -179,13 +180,70 @@ export async function startSupabaseAuthFixture(port, { onShutdown } = {}) {
         send(200, result.rows[0]);
         return;
       }
+      if (url.pathname === "/__test/markets/history/seed" && request.method === "POST") {
+        await withDatabase(async (instance) => {
+          const today = Math.floor(Date.now() / 86_400_000) * 86_400;
+          for (const [productId, base] of [["BTC-EUR", 65000], ["ETH-EUR", 3200]]) {
+            const candles = Array.from({ length: 400 }, (_, index) => {
+              const value = String(base + index);
+              return {
+                product_id: productId,
+                granularity: "ONE_DAY",
+                candle_start: new Date((today - (400 - index) * 86_400) * 1_000).toISOString(),
+                open_price: value,
+                high_price: String(base + index + 10),
+                low_price: String(base + index - 10),
+                close_price: String(base + index + 5),
+                volume: "12.500000000000000000",
+                source: "Coinbase Advanced Trade public API",
+                fetched_at: new Date(today * 1_000).toISOString(),
+              };
+            });
+            await instance.query("select * from public.upsert_market_candles($1::jsonb)", [JSON.stringify(candles)]);
+          }
+        });
+        send(200, { seeded: true });
+        return;
+      }
       if (url.pathname === "/__test/shutdown" && request.method === "POST" && onShutdown) {
         send(200, { stopped: true });
         setImmediate(onShutdown);
         return;
       }
-      if (request.headers.apikey !== TEST_PUBLISHABLE_KEY) {
+      if (![TEST_PUBLISHABLE_KEY, TEST_SECRET_KEY].includes(request.headers.apikey)) {
         deny("Invalid fixture publishable key");
+        return;
+      }
+      if (request.headers.apikey === TEST_SECRET_KEY && request.method === "POST"
+        && url.pathname === "/rest/v1/market_data_import_runs") {
+        const id = randomUUID();
+        send(201, { id });
+        return;
+      }
+      if (request.headers.apikey === TEST_SECRET_KEY && request.method === "PATCH"
+        && url.pathname === "/rest/v1/market_data_import_runs") {
+        send(200, []);
+        return;
+      }
+      if (request.headers.apikey === TEST_SECRET_KEY && request.method === "POST"
+        && url.pathname === "/rest/v1/rpc/upsert_market_candles") {
+        const body = await readBody(request);
+        try {
+          const result = await withDatabase(async (instance) => {
+            await instance.exec("begin; set local role service_role;");
+            try {
+              const result = await instance.query("select * from public.upsert_market_candles($1::jsonb)", [JSON.stringify(body.p_candles)]);
+              await instance.exec("commit");
+              return result;
+            } catch (error) {
+              await instance.exec("rollback");
+              throw error;
+            }
+          });
+          send(200, result.rows);
+        } catch (error) {
+          send(400, { code: error.code, message: error.message, details: null, hint: null });
+        }
         return;
       }
       if (url.pathname === "/auth/v1/token" && request.method === "POST") {
@@ -260,6 +318,32 @@ export async function startSupabaseAuthFixture(port, { onShutdown } = {}) {
               await instance.query("select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)", [record.user.id, JSON.stringify(record.claims)]);
               const functionName = initialize ? "initialize_dry_run_portfolio" : "get_dry_run_portfolio";
               const result = await instance.query(`select * from public.${functionName}($1::uuid)`, [body.p_owner_id]);
+              await instance.exec("commit");
+              return result;
+            } catch (error) {
+              await instance.exec("rollback");
+              throw error;
+            }
+          });
+          send(200, result.rows);
+        } catch (error) {
+          send(error.code === "42501" ? 403 : 400, { code: error.code, message: error.message, details: null, hint: null });
+        }
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/rest/v1/rpc/get_market_candles") {
+        const record = verifyToken(request.headers.authorization?.replace(/^Bearer\s+/i, ""));
+        if (!record) {
+          deny();
+          return;
+        }
+        const body = await readBody(request);
+        try {
+          const result = await withDatabase(async (instance) => {
+            await instance.exec("begin; set local role authenticated;");
+            try {
+              await instance.query("select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)", [record.user.id, JSON.stringify(record.claims)]);
+              const result = await instance.query("select * from public.get_market_candles($1, $2)", [body.p_product_id, body.p_limit]);
               await instance.exec("commit");
               return result;
             } catch (error) {

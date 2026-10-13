@@ -25,11 +25,11 @@ const products = {
 
 export function publicCoinbasePath(url) {
   if (url.origin !== "https://api.coinbase.com") return false;
-  return /^\/api\/v3\/brokerage\/market\/products\/(BTC-EUR|ETH-EUR)(\/ticker)?$/.test(url.pathname);
+  return /^\/api\/v3\/brokerage\/market\/products\/(BTC-EUR|ETH-EUR)(\/(?:ticker|candles))?$/.test(url.pathname);
 }
 
 export async function startCoinbaseFixture(port) {
-  const statistics = { requests: 0, products: 0, tickers: 0, paths: [] };
+  const statistics = { requests: 0, products: 0, tickers: 0, candles: 0, paths: [] };
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
     response.setHeader("Cache-Control", "no-store");
@@ -41,7 +41,7 @@ export async function startCoinbaseFixture(port) {
       send(200, statistics);
       return;
     }
-    const match = /^\/api\/v3\/brokerage\/market\/products\/(BTC-EUR|ETH-EUR)(\/ticker)?$/.exec(url.pathname);
+    const match = /^\/api\/v3\/brokerage\/market\/products\/(BTC-EUR|ETH-EUR)(\/(?:ticker|candles))?$/.exec(url.pathname);
     if (request.method !== "GET" || !match) {
       send(404, { error: "Unsupported public Coinbase fixture endpoint" });
       return;
@@ -50,7 +50,33 @@ export async function startCoinbaseFixture(port) {
     const product = products[productId];
     statistics.requests += 1;
     statistics.paths.push(url.pathname);
-    if (match[2]) {
+    if (match[2] === "/candles") {
+      statistics.candles += 1;
+      const start = Number(url.searchParams.get("start"));
+      const end = Number(url.searchParams.get("end"));
+      const limit = Number(url.searchParams.get("limit"));
+      if (url.searchParams.get("granularity") !== "ONE_DAY" || !Number.isInteger(start)
+        || !Number.isInteger(end) || !Number.isInteger(limit) || limit < 1 || limit > 350) {
+        send(400, { error: "Invalid candle fixture query" });
+        return;
+      }
+      const candles = [];
+      for (let candleStart = start; candleStart <= end && candles.length < limit; candleStart += 86_400) {
+        const offset = Math.floor((candleStart - start) / 86_400);
+        const close = Number(product.price) + offset;
+        candles.push({
+          start: String(candleStart),
+          open: close.toFixed(8),
+          high: (close + 10).toFixed(8),
+          low: (close - 10).toFixed(8),
+          close: (close + 2).toFixed(8),
+          volume: "12.500000000000000000",
+        });
+      }
+      send(200, { candles: candles.reverse() });
+      return;
+    }
+    if (match[2] === "/ticker") {
       statistics.tickers += 1;
       send(200, {
         trades: [{
