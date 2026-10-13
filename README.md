@@ -2,7 +2,7 @@
 
 AI Investor is a private Dry Run-only investment dashboard for a virtual EUR, BTC and ETH portfolio. It uses Next.js 16 App Router, strict TypeScript, Tailwind CSS, shadcn/ui and Supabase Auth.
 
-**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. **M2 Phase 1 adds read-only public BTC-EUR and ETH-EUR market data** to `/markets`. Live mode remains locked and unavailable; the agent is not configured.
+**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. **M2 adds read-only public BTC-EUR and ETH-EUR current quotes plus persistent validated daily history and closing-price charts** to `/markets`. Live mode remains locked and unavailable; the agent is not configured.
 
 ## Local setup
 
@@ -21,9 +21,11 @@ Create `.env.local` using `.env.example` as a template and set:
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR_SB_PUBLISHABLE_KEY
+# Required only by server-side historical ingestion. Never expose this value.
+SUPABASE_SECRET_KEY=YOUR_SB_SECRET_KEY
 ```
 
-Use the project's public `sb_publishable_...` key from **Connect** or **Settings → API Keys**. These two values are intentionally public; RLS protects financial records. No service-role key, secret key, database password or login password belongs in these variables. Startup/build rejects an invalid public configuration before compilation. `.env.local` is ignored by Git; never commit it.
+Use the project's public `sb_publishable_...` key from **Connect** or **Settings → API Keys**. The first two values are intentionally public; RLS protects financial records. `SUPABASE_SECRET_KEY` is server-only and enables the authenticated historical refresh action. A legacy `SUPABASE_SERVICE_ROLE_KEY` is accepted for projects that have not migrated to secret keys. Never put either privileged value in a `NEXT_PUBLIC_` variable, frontend code or source control. Startup/build rejects invalid public configuration before compilation. `.env.local` is ignored by Git; never commit it.
 
 Without configuration the login form is disabled and private routes redirect to login. Builds and isolated tests can run without a hosted project. Restart the dev server after changing `.env.local`.
 
@@ -42,7 +44,7 @@ The existing **ai-investor** project in **eu-west-2** is configured for this wor
 1. Create or choose the project's Supabase instance. Configure the Auth site URL as `http://localhost:3000` for local development.
 2. Under Auth settings, keep email/password authentication enabled and **disable public signups and anonymous sign-ins**. There is no registration interface or signup action in this application. `supabase/config.toml` applies these defaults only to a local stack; hosted settings must be configured separately.
 3. In **Authentication → Users**, manually add the owner account with a strong password and a confirmed email. Keep account passwords outside the repository. Additional manually provisioned users can access only their own rows; no user-editable metadata is trusted for authorization.
-4. For a new project only, apply pending version-controlled migrations after reviewing their target. The existing workspace project requires no migration deployment:
+4. Apply pending version-controlled migrations only after reviewing their target. Never replay an applied migration:
 
 ```bash
 npx supabase login
@@ -124,6 +126,27 @@ The authenticated page and `/markets/data` route verify the user independently. 
 
 This feed is informational. It does not change the existing EUR 500 portfolio, write market history or add trading, valuation, candle ingestion or scheduling. No migration is required. See [M2 market-data acceptance](docs/M2_MARKET_DATA_ACCEPTANCE.md) for scope, validation and manual checks.
 
+## Historical market data: FR-021, remaining FR-022, FR-025 and FR-053 charts
+
+The authenticated `/markets` page also reads persisted Coinbase `ONE_DAY`
+candles for BTC-EUR and ETH-EUR and renders responsive 30-, 90- and 365-day
+closing-price charts. Use **Refresh daily history** for the controlled initial
+backfill and later manual maintenance. The server imports up to 730 fully closed
+UTC days per asset through three public Coinbase requests of at most 350
+candles, validates every decimal value and OHLC relationship, and records gaps,
+rejections and the source fetch time. Missing days remain visibly incomplete;
+the application never interpolates them.
+
+Migration `20261013202443_ai_004_historical_market_candles.sql` provides the
+decimal-safe candle store, unique product/day key, RLS, authenticated read RPC,
+service-role-only idempotent upsert and owner-scoped import audit. Browser roles
+cannot manufacture or overwrite market history. The refresh action verifies
+the current user before creating the server-only admin client. It does not
+modify portfolio or ledger records. The forward migration
+`20261013204445_ai_005_optimize_market_history_rls.sql` applies the database
+advisor's Auth-helper optimization without changing access. See [M2 historical market-data acceptance](docs/M2_HISTORICAL_MARKET_DATA_ACCEPTANCE.md)
+for migration, backfill, validation and manual acceptance instructions.
+
 ## Login and session behavior
 
 Use `/login` with the manually provisioned email/password. Invalid credentials show a generic message. Login destinations are restricted to the seven workspace routes; supplied external URLs are ignored. Use **Log out** in the application header to end the current browser session.
@@ -143,7 +166,7 @@ Implementation references: [official Supabase Next.js SSR guidance](https://supa
 | `npm run start` | Serve the production build after running `npm run build`. |
 | `npm run lint` | Run ESLint. |
 | `npm run typecheck` | Check strict TypeScript types without emitting JavaScript. |
-| `npm test` | Run auth/session, portfolio and market-data unit tests plus real SQL RLS/constraint tests. |
+| `npm test` | Run auth/session, portfolio, current/historical market-data tests plus real SQL RLS/constraint tests. |
 | `npm run test:concurrency` | Test genuinely overlapping transactions in a disposable native PostgreSQL cluster. |
 | `npm run test:e2e` | Run browser auth, portfolio and market-data flows against isolated fixtures. |
 | `npm run test:markets:live` | Optional public Coinbase contract smoke test; requires network access, outside the default suite and CI. |
@@ -161,9 +184,19 @@ npm run build
 
 Before the first browser test run, install the test browser with `npx playwright install chromium`. The E2E runner uses its own loopback Auth fixture, disposable PostgreSQL/PGlite data and `.next-e2e` build output. Its RPC endpoints execute the actual migrations under the signed-in owner's database role. It overrides public configuration for its child process and never edits `.env.local`, creates hosted users or bypasses production authentication. These tests exercise the real SSR clients/cookies, with a test Auth HTTP service; they do not replace a hosted-provider login smoke test.
 
-Default market tests use deterministic HTTP fixtures and injected clocks; they do not depend on Coinbase availability. Run `npm run test:markets:live` separately when network access is available to validate the current public product/ticker contracts. The smoke test makes only public reads and needs no credentials; an upstream outage or rate limit is reported as a failure rather than replaced by fixture values.
+Default market tests use deterministic HTTP fixtures and injected clocks; they do not depend on Coinbase availability. Run `npm run test:markets:live` separately when network access is available to validate the current public product, ticker and daily-candle contracts. The smoke tests make only public reads and need no credentials; an upstream outage or rate limit is reported as a failure rather than replaced by fixture values.
 
 M2 Phase 1 validation passed: lint, strict typecheck, **378 unit/SQL tests across 13 files**, **30 browser tests** and production build. Native PostgreSQL concurrency checks and the separate public Coinbase smoke test also passed. Read-only hosted verification confirmed the unchanged single DRY_RUN portfolio and +500 EUR funding entry, with zero BTC/ETH. No migration or database write was needed. See [M2 market-data acceptance](docs/M2_MARKET_DATA_ACCEPTANCE.md) for corrections, coverage and manual checks; the M1 record below is retained as phase history.
+
+M2 Phase 2 validation passed on 13 October 2026: lint, strict typecheck,
+**411 unit/SQL tests across 17 files**, all native PostgreSQL concurrency checks,
+**33 browser tests**, production build and two read-only Coinbase smoke checks.
+AI-004 and forward policy optimization AI-005 are applied to the linked
+project. Hosted backfill stored 730 complete UTC daily candles for each product
+(2024-10-13 through 2026-10-12), with no gaps, duplicates or rejected rows; an
+immediate repeat skipped all 1,460 rows. The original EUR 500 portfolio and
+single funding entry remain unchanged. See [M2 historical market-data acceptance](docs/M2_HISTORICAL_MARKET_DATA_ACCEPTANCE.md)
+for deployment evidence and manual checks.
 
 The database suites execute the original foundation and the complete migration chain inside PostgreSQL via PGlite, with test-only Supabase roles/Auth scaffolding. They cover owner isolation, direct write denial, first/repeated funding, partial setup recovery, rollback, exact reconciliation and immutable history without Docker or credentials. PGlite queues requests, so its parallel calls are not evidence of overlapping transaction locks.
 
@@ -190,8 +223,8 @@ app/login/      Email/password login page and Server Action
 components/     Responsive shell, shared UI, auth/session components
 lib/auth/       Verified-user guard, safe redirects and logout action
 lib/portfolio/  Owner-scoped RPC services, validated ledger summaries and decimal formatting
-lib/markets/    Public Coinbase adapter, decimal quote contracts and server cache
-lib/supabase/   Separate browser/server clients and proxy session refresh
+lib/markets/    Public Coinbase current/history adapters, validation, storage and cache
+lib/supabase/   Browser/server clients, server-only admin client and proxy session refresh
 proxy.ts        Next.js 16 auth-refresh entry point
 supabase/       CLI config and version-controlled database migrations
 tests/          Auth/session tests, SQL RLS tests and browser tests/fixtures
@@ -213,9 +246,9 @@ After merging, return to `main`, run `git pull --ff-only origin main`, verify a 
 
 ## Current scope
 
-Authentication, the schema, initial ledger-backed portfolio and read-only public Coinbase market page are implemented. Agent, Trades, Performance and Settings remain placeholders. There is no AI analysis, scheduling, BUY/SELL functionality, secret-key client, live execution path or application deployment in the current scope.
+Authentication, the ledger-backed portfolio, read-only current Coinbase quotes, persistent validated daily history and closing-price charts are implemented. Agent, Trades, Performance and Settings remain placeholders. There is no AI analysis, scheduling, BUY/SELL functionality, browser secret-key client, live execution path or application deployment in the current scope.
 
-M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. M2 Phase 1 covers **FR-020 and partial FR-022/FR-024**, corresponding to AI-020. Candle validation and history remain pending. The recommended next scope is **FR-021**, UTC daily candle ingestion with the remaining FR-022 validation requirements, only when separately requested.
+M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. M2 Phase 1 covers **FR-020 and partial FR-022/FR-024**, corresponding to AI-020. M2 Phase 2 covers **FR-021, remaining FR-022 candle validation, FR-025 and the market-price chart scope of FR-053**, corresponding to AI-021. The recommended next scope is the next separately approved PRD phase; trading-strategy work is not part of this delivery.
 
 ## Troubleshooting
 
@@ -226,6 +259,7 @@ M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the or
 - **Portfolio error:** verify the new migration is applied and Supabase is reachable, then retry. Missing funding, inconsistent ledger history or unpriced nonzero crypto must be investigated instead of inserting extra funding or showing a sample balance.
 - **Market data unavailable:** check outbound HTTPS access to `api.coinbase.com` and retry after the server cooldown. No Coinbase key is required. Invalid product/ticker responses fail validation; inspect sanitized error codes instead of bypassing guards.
 - **Stale market data:** retrieval or known last-trade age reached 120 seconds. Keep the tab visible for polling or refresh after the server cooldown. A reference price with unknown exchange time remains labeled as such; it is not evidence of an executable quote.
+- **Historical refresh unavailable:** confirm `SUPABASE_SECRET_KEY` (or the legacy service-role key) is configured only on the server and AI-004 is applied. Retry after provider cooldown. Inspect the owner-scoped import audit and visible gap count; never insert a fabricated candle to hide an upstream gap.
 - **Denied table reads/writes:** apply the migration, sign in and use the user's own portfolio. Financial writes are intentionally denied from browser roles. Do not weaken RLS or add service keys to resolve this.
 - **CLI access error:** ensure the CLI can access its user configuration directory and the selected project's database; never print credential-bearing connection strings in logs.
 - **Browser executable missing:** run `npx playwright install chromium`. The database/unit suite needs no browser or Docker.

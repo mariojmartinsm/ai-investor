@@ -103,6 +103,52 @@ test("public BTC and ETH data display precise EUR formatting, provenance and dis
   await page.screenshot({ path: ".tmp/e2e-desktop-markets.png", fullPage: true, style: "nextjs-portal { display: none !important; }" });
 });
 
+test("historical charts show persisted BTC and ETH closes and switch 30, 90 and 365 day views", async ({ page, request }) => {
+  const seeded = await request.post(`${authURL}/__test/markets/history/seed`);
+  expect(seeded.ok()).toBeTruthy();
+  await login(page);
+  for (const product of ["BTC-EUR", "ETH-EUR"]) {
+    await expect(page.getByTestId(`history-chart-${product}`)).toBeVisible();
+    await expect(page.getByTestId(`history-count-${product}`)).toHaveText("Showing 90 daily closes.");
+    await expect(page.getByTestId(`history-card-${product}`)).toContainText("Coinbase Advanced Trade public API");
+    await expect(page.getByTestId(`history-card-${product}`)).toContainText("330 missing days");
+    await expect(page.getByTestId(`history-card-${product}`).getByText("Incomplete", { exact: true })).toBeVisible();
+  }
+  await page.getByRole("button", { name: "30D", exact: true }).click();
+  await expect(page.getByTestId("history-count-BTC-EUR")).toHaveText("Showing 30 daily closes.");
+  await page.getByRole("button", { name: "365D", exact: true }).click();
+  await expect(page.getByTestId("history-count-BTC-EUR")).toHaveText("Showing 365 daily closes.");
+  await expect(page.getByText("Dates and hover details use UTC.", { exact: false })).toBeVisible();
+});
+
+test("historical section has a clear empty state before the owner imports candles", async ({ page }) => {
+  await login(page);
+  await expect(page.getByText("No historical candles have been imported.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh daily history", exact: true })).toBeVisible();
+  for (const product of ["BTC-EUR", "ETH-EUR"]) {
+    await expect(page.getByTestId(`history-card-${product}`)).toContainText("No validated historical candles are stored yet.");
+  }
+});
+
+test("owner refresh backfills 730 closed days idempotently without changing the virtual portfolio", async ({ page, request }) => {
+  await login(page, "/dashboard");
+  await page.getByRole("button", { name: "Initialize virtual portfolio", exact: true }).click();
+  await expect(page.getByTestId("portfolio-total")).toHaveText("€500.00");
+  const portfolioBefore = await fixtureStats(request, authURL, "/__test/portfolio/stats");
+  await page.goto("/markets");
+  await page.getByRole("button", { name: "Refresh daily history", exact: true }).click();
+  await expect(page.getByText("Imported 1460, updated 0, skipped 0, rejected 0.", { exact: true })).toBeVisible();
+  for (const product of ["BTC-EUR", "ETH-EUR"]) {
+    await expect(page.getByTestId(`history-card-${product}`).getByText("Complete", { exact: true })).toBeVisible();
+    await expect(page.getByTestId(`history-count-${product}`)).toHaveText("Showing 90 daily closes.");
+  }
+  await page.getByRole("button", { name: "Refresh daily history", exact: true }).click();
+  await expect(page.getByText("Imported 0, updated 0, skipped 1460, rejected 0.", { exact: true })).toBeVisible();
+  expect(await fixtureStats(request, authURL, "/__test/portfolio/stats")).toEqual(portfolioBefore);
+  const stats = await fixtureStats(request, marketURL, "/__test/stats");
+  expect(stats.candles).toBeGreaterThanOrEqual(12);
+});
+
 test("visible markets poll once per minute and replace prices without inventing optional metrics", async ({ page }) => {
   await page.clock.install({ time: new Date() });
   await login(page);

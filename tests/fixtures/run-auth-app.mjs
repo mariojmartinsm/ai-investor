@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { startSupabaseAuthFixture, TEST_PUBLISHABLE_KEY } from "./supabase-auth.mjs";
+import { startSupabaseAuthFixture, TEST_PUBLISHABLE_KEY, TEST_SECRET_KEY } from "./supabase-auth.mjs";
 import { installCoinbaseFixtureFetch, startCoinbaseFixture } from "./coinbase.mjs";
 
 const appPort = Number(process.env.E2E_APP_PORT ?? "3002");
@@ -12,6 +12,7 @@ process.env.NEXT_TELEMETRY_DISABLED = "1";
 process.env.NEXT_BUILD_DIR = ".next-e2e";
 process.env.NEXT_PUBLIC_SUPABASE_URL = `http://127.0.0.1:${authPort}`;
 process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = TEST_PUBLISHABLE_KEY;
+process.env.SUPABASE_SECRET_KEY = TEST_SECRET_KEY;
 
 // A test-only custom server keeps cleanup in one process on Windows, where
 // Playwright's taskkill-based child-tree shutdown can be restricted by a sandbox.
