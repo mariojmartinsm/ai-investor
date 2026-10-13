@@ -69,7 +69,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <footer className="mx-auto flex max-w-7xl flex-wrap justify-between gap-2 px-4 pt-2 pb-7 text-xs text-muted-foreground sm:px-8 lg:px-10">
-          <p>Virtual funds only · Market feeds not connected.</p>
+          <p>Virtual funds only · Public Coinbase market data.</p>
           <p>Dry Run only · Live mode unavailable</p>
         </footer>
       </div>

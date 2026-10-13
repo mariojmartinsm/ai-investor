@@ -52,7 +52,7 @@ export default async function DashboardPage() {
           <CardHeader>
             <div className="mb-2 flex size-10 items-center justify-center rounded-xl bg-accent"><ShieldCheck aria-hidden="true" className="size-5 text-primary" /></div>
             <CardTitle className="text-base">Explore with confidence</CardTitle>
-            <CardDescription className="leading-6">Portfolio balances are persisted virtual funds. Market feeds and automation are not yet configured.</CardDescription>
+            <CardDescription className="leading-6">Portfolio balances are persisted virtual funds. Public Coinbase prices are available on Markets; automation is not yet configured.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
             <div className="flex items-start gap-2.5"><FlaskConical aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" /><p className="text-muted-foreground">Dry Run is the only available mode.</p></div>
