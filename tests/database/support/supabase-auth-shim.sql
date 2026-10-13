@@ -5,7 +5,12 @@ create role authenticated nologin;
 create role service_role nologin bypassrls;
 
 create schema auth;
-create table auth.users (id uuid primary key, aud text, role text);
+create table auth.users (
+  id uuid primary key,
+  aud text,
+  role text,
+  is_anonymous boolean not null default false
+);
 
 create function auth.uid()
 returns uuid
@@ -15,8 +20,17 @@ as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
 $$;
 
+create function auth.jwt()
+returns jsonb
+language sql
+stable
+as $$
+  select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb);
+$$;
+
 grant usage on schema auth to anon, authenticated, service_role;
 grant execute on function auth.uid() to anon, authenticated, service_role;
+grant execute on function auth.jwt() to anon, authenticated, service_role;
 
 -- Model Supabase's broad historical defaults so the migration must explicitly
 -- remove them, rather than passing security tests only on a pristine database.

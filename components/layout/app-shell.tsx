@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mt-auto rounded-xl border bg-background p-4">
           <ShieldCheck aria-hidden="true" className="mb-3 size-5 text-primary" />
           <p className="text-sm font-semibold">A virtual starting point</p>
-          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">Explore the workspace with sample data. Live mode is unavailable.</p>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">Your portfolio uses virtual funds. Live mode is unavailable.</p>
           <Link href="/live" className="mt-4 flex items-center gap-2 rounded-sm text-xs font-medium text-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
             <LockKeyhole aria-hidden="true" className="size-3.5" />
             About Live mode
@@ -69,7 +69,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <footer className="mx-auto flex max-w-7xl flex-wrap justify-between gap-2 px-4 pt-2 pb-7 text-xs text-muted-foreground sm:px-8 lg:px-10">
-          <p>Sample workspace · Values are illustrative only.</p>
+          <p>Virtual funds only · Market feeds not connected.</p>
           <p>Dry Run only · Live mode unavailable</p>
         </footer>
       </div>

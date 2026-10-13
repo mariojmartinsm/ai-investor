@@ -2,7 +2,7 @@
 
 AI Investor is a private Dry Run-only investment dashboard for a virtual EUR, BTC and ETH portfolio. It uses Next.js 16 App Router, strict TypeScript, Tailwind CSS, shadcn/ui and Supabase Auth.
 
-**AI-002 adds Supabase authentication and the database foundation.** Existing pages retain their **€500.00 sample virtual portfolio**, labelled BTC/ETH placeholders and unconfigured agent. No portfolio or ledger rows are initialized; that remains AI-003. Live mode is locked and unavailable.
+**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. Live mode remains locked and unavailable; market feeds and the agent are not configured.
 
 ## Local setup
 
@@ -37,12 +37,12 @@ Open [http://localhost:3000](http://localhost:3000). Logged-out users reach `/lo
 
 ## Supabase setup and migrations
 
-The existing **ai-investor** project in **eu-west-2** is configured for this workspace through ignored `.env.local`. Migration `20261012065128_ai_002_auth_database_foundation.sql` is already applied there, and its local version matches hosted migration history. Hosted email/password authentication is enabled, public signup and anonymous sign-ins are disabled, and the site URL is `http://localhost:3000`. There are no user accounts yet: manually create and confirm the owner before the first login. Other checkouts still need their own `.env.local`.
+The existing **ai-investor** project in **eu-west-2** is configured for this workspace through ignored `.env.local`. Both `20261012065128_ai_002_auth_database_foundation.sql` and `20261013085416_ai_003_initialize_dry_run_portfolio.sql` are already applied there. On 13 October 2026, hosted migration history and the initializer/read RPCs were verified against the local implementation; the applied migration statements match the local SQL after whitespace/comment normalization. Do not replay or duplicate this migration. The owner has already initialized one DRY_RUN portfolio with one EUR `INITIAL_CAPITAL` posting and exactly **€500.00 virtual cash**. Preserve this financial history; tests use isolated fixtures. Authentication works for the existing owner. Keep email/password authentication enabled, public signup and anonymous sign-ins disabled, and configure the site URL for the environment. Other checkouts still need their own `.env.local`.
 
 1. Create or choose the project's Supabase instance. Configure the Auth site URL as `http://localhost:3000` for local development.
 2. Under Auth settings, keep email/password authentication enabled and **disable public signups and anonymous sign-ins**. There is no registration interface or signup action in this application. `supabase/config.toml` applies these defaults only to a local stack; hosted settings must be configured separately.
 3. In **Authentication → Users**, manually add the owner account with a strong password and a confirmed email. Keep account passwords outside the repository. Additional manually provisioned users can access only their own rows; no user-editable metadata is trusted for authorization.
-4. Apply the version-controlled migration after reviewing its target:
+4. For a new project only, apply pending version-controlled migrations after reviewing their target. The existing workspace project requires no migration deployment:
 
 ```bash
 npx supabase login
@@ -55,9 +55,64 @@ The CLI prompts for credentials when needed; do not put secrets in command histo
 
 The migration creates `public.portfolios` and `public.portfolio_ledger`, with UUID keys, ownership FKs, `numeric(28,12)` values, EUR/€500 configuration, DRY_RUN-only constraints, timestamps and posting idempotency. It enables RLS and explicitly grants authenticated users **SELECT only**. Ledger SELECT follows portfolio ownership. Anonymous roles have no access. Browser clients cannot insert, update or delete financial records; the service role can append ledger records but is not configured in this app.
 
-No financial rows, initialization function, seed, exchange connection or scheduled job are created. For rollback on an unused database, drop the ledger before portfolios through a reviewed migration. Once history exists, preserve it and use forward migrations.
+The AI-002 migration creates no financial rows. AI-003 adds narrowly scoped initialization/read functions and ledger invariants without seeding or rewriting financial history. Once history exists, preserve it and use reviewed forward migrations; never delete funding entries to reset a portfolio.
 
 For optional local Supabase development, install Docker and run `npx supabase start`; the CLI applies the same migrations. `supabase/config.toml` disables signup/anonymous login and financial seeding. Never run `db reset` against a database whose data must be retained.
+
+## Portfolio foundation: FR-010, FR-013 and initial FR-011
+
+See [M1 portfolio acceptance](docs/M1_PORTFOLIO_ACCEPTANCE.md) for the AI-015
+plan mapping, current verification results and deployment acceptance steps.
+
+Sign in and open `/dashboard`. Before initialization, the dashboard displays a setup state instead of a sample balance. Select **Initialize virtual portfolio** once. The server independently verifies your identity and calls the database using your cookie session and public key. No service-role key or additional environment variable is required.
+
+The database initializer locks the authenticated owner's existing Auth row, reuses the unique owner/DRY_RUN portfolio, and records one `INITIAL_CAPITAL` posting of `500.000000000000` EUR. The portfolio and funding insert commit together. Concurrent requests, refreshes, retries and later logins cannot add starting capital again. An existing empty, unfunded portfolio can be completed; other inconsistent history is rejected rather than topped up.
+
+The privileged writer lives in the unexposed `private` schema with an empty `search_path`, explicit current-owner checks, a real nonanonymous Auth-user check and restricted execution permissions. Public RPC wrappers are security invokers; their read queries retain RLS. Neither RPC accepts a funding amount, currency or mode. Keep `private` out of the project's exposed Data API schemas.
+
+Financial tables remain read-only for browser roles. A unique partial index permits only one initial funding record per portfolio, and its constraint requires exactly EUR/500. An invoker trigger rejects ledger updates, deletes and truncation even for privileged append writers. Corrections require new audited postings in a future authorized accounting feature, never changes to existing entries.
+
+Balances are aggregated from signed ledger entries with PostgreSQL `numeric`, then returned as decimal strings. TypeScript uses a pinned `decimal.js` constructor with 40 significant digits; it never converts money to JavaScript `Number`. EUR display rounds half-up to two decimals; stored amounts remain at twelve decimal places. Asset quantities retain up to twelve places. In this all-cash milestone, NAV equals available EUR and cumulative P&L equals NAV minus initial capital. Nonzero unpriced crypto, malformed balances or unreconciled funding produce an error instead of a fabricated valuation.
+
+| Requirement | Implemented behavior |
+| --- | --- |
+| FR-010 | One atomic, idempotent DRY_RUN portfolio per owner; exactly €500 EUR and zero BTC/ETH. |
+| FR-013 | One immutable initial funding posting, database uniqueness, signed numeric ledger reconciliation and denied direct client writes. |
+| FR-011, initial balances | Persisted total value, available EUR, BTC/ETH quantities and initial €0.00 cumulative P&L, with loading, empty and retryable error states. |
+
+### Safe migration deployment
+
+The workspace project already has both migrations. The following steps apply
+to new environments or future reviewed schema changes; for the current project,
+proceed directly to manual acceptance.
+
+1. Review the new SQL, confirm the linked project and take a recoverable backup before changing any database with financial history. Do not modify or replay the original AI-002 migration.
+2. Check for incompatible existing funding records. These queries must return no rows; stop and investigate history if they do:
+
+```sql
+select portfolio_id, count(*)
+from public.portfolio_ledger
+where transaction_type = 'INITIAL_CAPITAL'
+group by portfolio_id having count(*) > 1;
+
+select id from public.portfolio_ledger
+where transaction_type = 'INITIAL_CAPITAL'
+  and (currency <> 'EUR' or amount <> 500);
+```
+
+3. Run the CLI login/link and `db push --linked --dry-run --skip-vault` commands above. Check that only the intended pending migration is listed, then run `db push --linked --skip-vault`. Credentials should be entered at prompts or supplied through your secret manager.
+4. Run the complete `tests/database/hosted-portfolio.sql` file in one administrator SQL session. It verifies the actual hosted roles, owner isolation, first/repeated initialization and append-only protection, then rolls all synthetic users and financial fixtures back. Re-run security advisors and confirm `private` is not exposed through the Data API.
+5. Sign in, initialize through the dashboard, then perform the acceptance steps below. Applying the migration alone creates no owner portfolio or financial data.
+
+If migration validation fails, fix it before deploying. After funding is used, roll back application behavior or make a reviewed forward schema change; preserve existing ledger rows and constraints that protect them. The current M1 phase requires no hosted migration or application deployment. Its authorized Git lifecycle proceeds only after local validation and required GitHub checks pass.
+
+### Manual acceptance
+
+1. Sign in with the existing confirmed owner. Verify the persisted portfolio shows total/available EUR **€500.00**, **0 BTC**, **0 ETH** and cumulative P&L **€0.00**; do not reset it or add funding.
+2. In isolated tests or a separate disposable environment, verify a new owner's empty state and initialize concurrently from two tabs. Both must resolve to the same portfolio and exactly one initial funding posting. Repeated setup is verified without changing the hosted owner's records.
+3. Reload, log out and sign in again. Values and the portfolio UUID must remain unchanged; no extra initial funding posting may appear.
+4. As an administrator, verify exactly one owner portfolio and one EUR `INITIAL_CAPITAL` posting. As a second user, confirm owner A's rows and RPCs are inaccessible. Anonymous RPC calls and direct authenticated ledger writes must be denied.
+5. Check loading and retry behavior during database outages, desktop/mobile layout and locked Live mode. No buy, sell or scheduling controls should be available.
 
 ## Login and session behavior
 
@@ -79,7 +134,8 @@ Implementation references: [official Supabase Next.js SSR guidance](https://supa
 | `npm run lint` | Run ESLint. |
 | `npm run typecheck` | Check strict TypeScript types without emitting JavaScript. |
 | `npm test` | Run auth/session unit tests and real SQL RLS/constraint tests. |
-| `npm run test:e2e` | Run browser login/session/protected-page tests against an isolated Auth fixture. |
+| `npm run test:concurrency` | Test genuinely overlapping transactions in a disposable native PostgreSQL cluster. |
+| `npm run test:e2e` | Run browser auth and ledger-backed portfolio flows against an isolated fixture. |
 
 Validate changes locally with:
 
@@ -87,17 +143,29 @@ Validate changes locally with:
 npm run lint
 npm run typecheck
 npm test
+npm run test:concurrency
 npm run test:e2e
 npm run build
 ```
 
-Before the first browser test run, install the test browser with `npx playwright install chromium`. The E2E runner uses its own loopback Auth fixture and `.next-e2e` build output. It overrides public configuration for its child process and never edits `.env.local`, creates hosted users or bypasses production authentication. These tests exercise the real SSR clients/cookies, with a test Auth HTTP service; they do not replace a hosted-provider login smoke test.
+Before the first browser test run, install the test browser with `npx playwright install chromium`. The E2E runner uses its own loopback Auth fixture, disposable PostgreSQL/PGlite data and `.next-e2e` build output. Its RPC endpoints execute the actual migrations under the signed-in owner's database role. It overrides public configuration for its child process and never edits `.env.local`, creates hosted users or bypasses production authentication. These tests exercise the real SSR clients/cookies, with a test Auth HTTP service; they do not replace a hosted-provider login smoke test.
 
-The database suite runs the actual migration inside PostgreSQL via PGlite, with test-only Supabase Auth roles/`auth.uid()` scaffolding. It tests two owners, anonymous access, cross-owner denial, every financial write denial, RLS even if grants accidentally broaden, idempotency, precision and constraints without Docker or credentials.
+The database suites execute the original foundation and the complete migration chain inside PostgreSQL via PGlite, with test-only Supabase roles/Auth scaffolding. They cover owner isolation, direct write denial, first/repeated funding, partial setup recovery, rollback, exact reconciliation and immutable history without Docker or credentials. PGlite queues requests, so its parallel calls are not evidence of overlapping transaction locks.
 
-`tests/database/hosted-rls.sql` also verifies these access rules against the hosted database's actual roles and `auth.uid()`. Run the entire file as one administrator query after the migration. It creates credential-free synthetic users and financial test fixtures inside a transaction, asserts access and write denial, then rolls everything back. This verification passed on the connected project; the Auth user, portfolio and ledger tables remained empty afterward. The hosted Auth endpoint was verified reachable and rejects invalid credentials; successful hosted login still requires the manually provisioned owner.
+For `test:concurrency`, make native PostgreSQL `initdb`, `pg_ctl` and `psql` available on PATH, or set `PG_TEST_BIN` to their binary directory. On Windows, portable binaries are available from the [official PostgreSQL download page](https://www.postgresql.org/download/windows/). This test creates its own local temporary cluster and never connects to the hosted project or an existing database. The separate sessions test lock contention, commit and rollback; the runner shuts the cluster down afterward. Missing binaries fail with setup instructions rather than silently skipping the concurrency check.
 
-The hosted security advisor reports no findings. The performance advisor initially reports the [ledger index as unused](https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index), which is expected while the ledger is empty; retain it for the planned portfolio history reads.
+For example in PowerShell:
+
+```powershell
+$env:PG_TEST_BIN = 'C:\path\to\PostgreSQL\bin'
+npm run test:concurrency
+```
+
+M1 validation passed: lint, strict typecheck, **226 unit/SQL tests across nine files**, **19 browser tests**, native PostgreSQL concurrency/failure checks and production build. `npm audit --omit=dev` reports zero production dependency vulnerabilities. Read-only hosted checks confirmed one DRY_RUN portfolio, one +500 EUR initial funding entry, EUR 500 and zero BTC/ETH, enabled RLS and denied direct authenticated writes. Details and corrected defects are recorded in [M1 portfolio acceptance](docs/M1_PORTFOLIO_ACCEPTANCE.md). All test fixtures are isolated. Validate the existing owner's dashboard by reading its persisted values, refreshing and logging out/in; preserve the existing portfolio and funding entry.
+
+`tests/database/hosted-rls.sql` verifies the original access rules against the hosted database's actual roles and `auth.uid()`. Run the entire file as one administrator query after migration. It creates credential-free synthetic users and financial test fixtures inside a transaction, asserts access and write denial, then rolls everything back. AI-002 hosted verification passed with all fixtures removed; its hosted login/logout smoke test also passed using a temporary account that was removed afterward. AI-003 tests verify this SQL remains compatible with both migrations. `tests/database/hosted-portfolio.sql` has now also passed on the hosted project: first/repeated setup, owner isolation, anonymous denial, direct ledger write denial and append-only guards passed, with all synthetic data rolled back.
+
+Hosted security review found no financial-table RLS or database-function warnings. The existing [leaked-password-protection warning](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection) is reviewed as nonblocking Auth hardening for this existing-owner phase, which introduces no signup or password-change paths. Supabase offers that protection on Pro plans and above. Retain the ledger index for portfolio history reads even if a small dataset produces an unused-index advisory.
 
 ## Project structure
 
@@ -106,6 +174,7 @@ app/(private)/  Existing workspace pages behind a server auth guard
 app/login/      Email/password login page and Server Action
 components/     Responsive shell, shared UI, auth/session components
 lib/auth/       Verified-user guard, safe redirects and logout action
+lib/portfolio/  Owner-scoped RPC services, validated ledger summaries and decimal formatting
 lib/supabase/   Separate browser/server clients and proxy session refresh
 proxy.ts        Next.js 16 auth-refresh entry point
 supabase/       CLI config and version-controlled database migrations
@@ -120,18 +189,25 @@ Next.js automatic agent-rule generation is disabled in `next.config.ts` so runni
 
 Read [AGENTS.md](AGENTS.md), [the PRD](docs/PRD.md) and [the implementation plan](docs/CODEX_IMPLEMENTATION_PLAN.md) before making changes.
 
+## Development workflow
+
+Use the PRD's FR-xxx IDs to define each requested phase. Start from updated `main` on a dedicated feature branch, preserve user changes, implement the requirements and fix all validation failures with regression tests. Run the complete local checks above and the required GitHub checks before merging. The authorized workflow includes committing, pushing, creating a PR and merging automatically when every gate passes. Never bypass checks or merge unresolved security issues.
+
+After merging, return to `main`, run `git pull --ff-only origin main`, verify a clean working tree and equality with `origin/main`, and delete the merged local feature branch only when safe. Start the next phase from updated `main`. The detailed workflow and financial safeguards are in [AGENTS.md](AGENTS.md); LIVE trading requires separate explicit approval and a separately approved release.
+
 ## Current scope
 
-Authentication and schema are implemented; the dashboard remains sample data. No Coinbase feed, AI analysis, scheduling, trading logic or ledger initialization is implemented. No secret-key client, live execution path or application deployment is included.
+Authentication, the schema and initial ledger-backed portfolio are implemented. Other workspace pages remain placeholders. No Coinbase feed, AI analysis, scheduling, BUY/SELL functionality, secret-key client, live execution path or application deployment is included.
 
-The next requested issue is **AI-003**, for idempotent financial initialization and its business logic. Original planning documents retain their original backlog numbering; this README follows the current task's AI-002/AI-003 scope.
+M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. The recommended next scope is **FR-020**, public BTC-EUR/ETH-EUR market data, followed by timestamped valuation requirements in M2. Start it only when separately requested.
 
 ## Troubleshooting
 
 - **Disabled login:** check both public variables and use a modern `sb_publishable_` key, then restart the dev server.
 - **Invalid login:** check email/password, email confirmation and that the account was manually provisioned. The application deliberately does not reveal whether an email exists.
 - **Redirected after login or refresh:** consistently use `localhost` or `127.0.0.1`; cookies are host-specific. Check Supabase availability and refresh-token settings, and do not cache auth responses.
-- **Empty financial tables:** expected in AI-002. The €500 screen is sample data; initialization belongs to AI-003.
+- **Empty financial tables:** expected before explicit setup. The workspace migration is applied; use **Initialize virtual portfolio** while signed in. Opening the dashboard does not create funds.
+- **Portfolio error:** verify the new migration is applied and Supabase is reachable, then retry. Missing funding, inconsistent ledger history or unpriced nonzero crypto must be investigated instead of inserting extra funding or showing a sample balance.
 - **Denied table reads/writes:** apply the migration, sign in and use the user's own portfolio. Financial writes are intentionally denied from browser roles. Do not weaken RLS or add service keys to resolve this.
 - **CLI access error:** ensure the CLI can access its user configuration directory and the selected project's database; never print credential-bearing connection strings in logs.
 - **Browser executable missing:** run `npx playwright install chromium`. The database/unit suite needs no browser or Docker.

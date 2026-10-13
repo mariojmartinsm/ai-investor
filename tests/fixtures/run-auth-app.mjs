@@ -31,6 +31,7 @@ async function stop() {
     new Promise((resolve) => appServer.close(resolve)),
     new Promise((resolve) => authServer.close(resolve)),
   ]);
+  await authServer.closeDatabase();
   process.exit(0);
 }
 
