@@ -1,19 +1,18 @@
 import type { Metadata } from "next";
-import { ChartCandlestick } from "lucide-react";
-
-import { PlaceholderPage } from "@/components/placeholder-page";
-import { AssetCard } from "@/components/portfolio/asset-card";
-import { sampleAssets } from "@/lib/sample-data";
+import { MarketOverview } from "@/components/markets/market-overview";
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { getMarketPageData } from "@/lib/markets/server";
 
 export const metadata: Metadata = { title: "Markets" };
+export const dynamic = "force-dynamic";
 
-export default function MarketsPage() {
+export default async function MarketsPage() {
+  const { markets, renderedAt } = await getMarketPageData();
   return (
-    <div className="space-y-6">
-      <PlaceholderPage title="Markets" description="A dedicated view for Bitcoin and Ethereum, priced in EUR." icon={ChartCandlestick} sectionTitle="Market overview" emptyTitle="Market data is not connected" emptyDescription="BTC-EUR and ETH-EUR prices, completed daily candles, and quote timestamps will appear here when market data is configured." />
-      <section aria-label="Placeholder asset cards" className="grid gap-5 md:grid-cols-2">
-        {sampleAssets.map((asset) => <AssetCard key={asset.symbol} asset={asset} />)}
-      </section>
+    <div className="space-y-7">
+      <PageHeader eyebrow="Markets / Public Coinbase prices" title="Markets" description="Bitcoin and Ethereum market information, priced in EUR." action={<Badge variant="outline">Dry Run only</Badge>} />
+      <MarketOverview initialData={markets} renderedAt={renderedAt} />
     </div>
   );
 }

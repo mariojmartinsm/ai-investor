@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:concurrency": "node tests/database/concurrency.mjs",
+    "test:markets:live": "vitest run --config vitest.smoke.config.mts",
     "test:e2e": "playwright test"
   },
   "engines": {

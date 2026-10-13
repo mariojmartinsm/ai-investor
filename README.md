@@ -2,7 +2,7 @@
 
 AI Investor is a private Dry Run-only investment dashboard for a virtual EUR, BTC and ETH portfolio. It uses Next.js 16 App Router, strict TypeScript, Tailwind CSS, shadcn/ui and Supabase Auth.
 
-**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. Live mode remains locked and unavailable; market feeds and the agent are not configured.
+**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. **M2 Phase 1 adds read-only public BTC-EUR and ETH-EUR market data** to `/markets`. Live mode remains locked and unavailable; the agent is not configured.
 
 ## Local setup
 
@@ -114,6 +114,16 @@ If migration validation fails, fix it before deploying. After funding is used, r
 4. As an administrator, verify exactly one owner portfolio and one EUR `INITIAL_CAPITAL` posting. As a second user, confirm owner A's rows and RPCs are inaccessible. Anonymous RPC calls and direct authenticated ledger writes must be denied.
 5. Check loading and retry behavior during database outages, desktop/mobile layout and locked Live mode. No buy, sell or scheduling controls should be available.
 
+## Public market data: FR-020, partial FR-022 and FR-024
+
+Sign in and open `/markets` to view BTC-EUR and ETH-EUR prices, 24-hour percentage changes, base-asset volumes and available bid/ask quotes. The server calls only Coinbase's fixed public Advanced Trade product and ticker endpoints for these two pairs. No Coinbase account, API key or additional environment variable is required. Public methods do not require a JWT. [Coinbase REST endpoint guidance](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/rest-api).
+
+Values are validated decimal strings; malformed or missing required data never becomes a sample price or zero. Present malformed JSON or schema data fails closed even when the other endpoint is valid. A ticker transport failure or empty trade list may use a validated product reference price, identified as a reference with unknown exchange time. A valid ticker can also supply a price when product transport fails, with unavailable product statistics left empty. A stale or future-dated trade is never silently replaced by a reference. Last-trade timestamps, when provided, are separate from application retrieval time; bid/ask has no claimed exchange timestamp. See [public product](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/public/get-public-product) and [public market trades](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/public/get-public-market-trades) contracts.
+
+The authenticated page and `/markets/data` route verify the user independently. The browser polls the application server approximately every 60 seconds while visible, without overlapping requests. A five-second freshness/deadline check and minimum 60-second interval between attempts normally give a 60–65-second poll cadence after a visibility-triggered refresh. A warm-process server cache retains validated results for 60 seconds per product and deduplicates concurrent requests. Failures have a 30-second cooldown; longer `Retry-After` headers on 429/5xx responses block both products until their provider cooldown expires. Each endpoint has at most three attempts, each with a three-second timeout including the response body. A quote becomes stale at 120 seconds based on retrieval time or its known last-trade time. Freshness ages in the browser between polls. Failed refreshes immediately hide prior numeric quotes while preserving their original timestamps. Initial loading uses a skeleton; stale/unavailable cards show status badges and automatic-retry text.
+
+This feed is informational. It does not change the existing EUR 500 portfolio, write market history or add trading, valuation, candle ingestion or scheduling. No migration is required. See [M2 market-data acceptance](docs/M2_MARKET_DATA_ACCEPTANCE.md) for scope, validation and manual checks.
+
 ## Login and session behavior
 
 Use `/login` with the manually provisioned email/password. Invalid credentials show a generic message. Login destinations are restricted to the seven workspace routes; supplied external URLs are ignored. Use **Log out** in the application header to end the current browser session.
@@ -133,9 +143,10 @@ Implementation references: [official Supabase Next.js SSR guidance](https://supa
 | `npm run start` | Serve the production build after running `npm run build`. |
 | `npm run lint` | Run ESLint. |
 | `npm run typecheck` | Check strict TypeScript types without emitting JavaScript. |
-| `npm test` | Run auth/session unit tests and real SQL RLS/constraint tests. |
+| `npm test` | Run auth/session, portfolio and market-data unit tests plus real SQL RLS/constraint tests. |
 | `npm run test:concurrency` | Test genuinely overlapping transactions in a disposable native PostgreSQL cluster. |
-| `npm run test:e2e` | Run browser auth and ledger-backed portfolio flows against an isolated fixture. |
+| `npm run test:e2e` | Run browser auth, portfolio and market-data flows against isolated fixtures. |
+| `npm run test:markets:live` | Optional public Coinbase contract smoke test; requires network access, outside the default suite and CI. |
 
 Validate changes locally with:
 
@@ -149,6 +160,10 @@ npm run build
 ```
 
 Before the first browser test run, install the test browser with `npx playwright install chromium`. The E2E runner uses its own loopback Auth fixture, disposable PostgreSQL/PGlite data and `.next-e2e` build output. Its RPC endpoints execute the actual migrations under the signed-in owner's database role. It overrides public configuration for its child process and never edits `.env.local`, creates hosted users or bypasses production authentication. These tests exercise the real SSR clients/cookies, with a test Auth HTTP service; they do not replace a hosted-provider login smoke test.
+
+Default market tests use deterministic HTTP fixtures and injected clocks; they do not depend on Coinbase availability. Run `npm run test:markets:live` separately when network access is available to validate the current public product/ticker contracts. The smoke test makes only public reads and needs no credentials; an upstream outage or rate limit is reported as a failure rather than replaced by fixture values.
+
+M2 Phase 1 validation passed: lint, strict typecheck, **378 unit/SQL tests across 13 files**, **30 browser tests** and production build. Native PostgreSQL concurrency checks and the separate public Coinbase smoke test also passed. Read-only hosted verification confirmed the unchanged single DRY_RUN portfolio and +500 EUR funding entry, with zero BTC/ETH. No migration or database write was needed. See [M2 market-data acceptance](docs/M2_MARKET_DATA_ACCEPTANCE.md) for corrections, coverage and manual checks; the M1 record below is retained as phase history.
 
 The database suites execute the original foundation and the complete migration chain inside PostgreSQL via PGlite, with test-only Supabase roles/Auth scaffolding. They cover owner isolation, direct write denial, first/repeated funding, partial setup recovery, rollback, exact reconciliation and immutable history without Docker or credentials. PGlite queues requests, so its parallel calls are not evidence of overlapping transaction locks.
 
@@ -175,6 +190,7 @@ app/login/      Email/password login page and Server Action
 components/     Responsive shell, shared UI, auth/session components
 lib/auth/       Verified-user guard, safe redirects and logout action
 lib/portfolio/  Owner-scoped RPC services, validated ledger summaries and decimal formatting
+lib/markets/    Public Coinbase adapter, decimal quote contracts and server cache
 lib/supabase/   Separate browser/server clients and proxy session refresh
 proxy.ts        Next.js 16 auth-refresh entry point
 supabase/       CLI config and version-controlled database migrations
@@ -197,9 +213,9 @@ After merging, return to `main`, run `git pull --ff-only origin main`, verify a 
 
 ## Current scope
 
-Authentication, the schema and initial ledger-backed portfolio are implemented. Other workspace pages remain placeholders. No Coinbase feed, AI analysis, scheduling, BUY/SELL functionality, secret-key client, live execution path or application deployment is included.
+Authentication, the schema, initial ledger-backed portfolio and read-only public Coinbase market page are implemented. Agent, Trades, Performance and Settings remain placeholders. There is no AI analysis, scheduling, BUY/SELL functionality, secret-key client, live execution path or application deployment in the current scope.
 
-M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. The recommended next scope is **FR-020**, public BTC-EUR/ETH-EUR market data, followed by timestamped valuation requirements in M2. Start it only when separately requested.
+M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. M2 Phase 1 covers **FR-020 and partial FR-022/FR-024**, corresponding to AI-020. Candle validation and history remain pending. The recommended next scope is **FR-021**, UTC daily candle ingestion with the remaining FR-022 validation requirements, only when separately requested.
 
 ## Troubleshooting
 
@@ -208,6 +224,8 @@ M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the or
 - **Redirected after login or refresh:** consistently use `localhost` or `127.0.0.1`; cookies are host-specific. Check Supabase availability and refresh-token settings, and do not cache auth responses.
 - **Empty financial tables:** expected before explicit setup. The workspace migration is applied; use **Initialize virtual portfolio** while signed in. Opening the dashboard does not create funds.
 - **Portfolio error:** verify the new migration is applied and Supabase is reachable, then retry. Missing funding, inconsistent ledger history or unpriced nonzero crypto must be investigated instead of inserting extra funding or showing a sample balance.
+- **Market data unavailable:** check outbound HTTPS access to `api.coinbase.com` and retry after the server cooldown. No Coinbase key is required. Invalid product/ticker responses fail validation; inspect sanitized error codes instead of bypassing guards.
+- **Stale market data:** retrieval or known last-trade age reached 120 seconds. Keep the tab visible for polling or refresh after the server cooldown. A reference price with unknown exchange time remains labeled as such; it is not evidence of an executable quote.
 - **Denied table reads/writes:** apply the migration, sign in and use the user's own portfolio. Financial writes are intentionally denied from browser roles. Do not weaken RLS or add service keys to resolve this.
 - **CLI access error:** ensure the CLI can access its user configuration directory and the selected project's database; never print credential-bearing connection strings in logs.
 - **Browser executable missing:** run `npx playwright install chromium`. The database/unit suite needs no browser or Docker.
