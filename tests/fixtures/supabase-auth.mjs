@@ -181,6 +181,21 @@ export async function startSupabaseAuthFixture(port, { onShutdown } = {}) {
         send(200, result.rows[0]);
         return;
       }
+      if (url.pathname === "/__test/strategy/stats") {
+        const result = await withDatabase((instance) => instance.query(`
+          select (select count(*)::integer from public.strategy_analysis_runs) as analyses,
+            (select count(*)::integer from public.market_candles) as candles,
+            (select count(*)::integer from public.portfolios) as portfolios,
+            count(*)::integer as ledger_entries,
+            count(*) filter (where transaction_type = 'INITIAL_CAPITAL')::integer as initial_funding_entries,
+            coalesce(sum(amount) filter (where currency = 'EUR'), 0)::text as eur_balance,
+            coalesce(sum(amount) filter (where currency = 'BTC'), 0)::text as btc_balance,
+            coalesce(sum(amount) filter (where currency = 'ETH'), 0)::text as eth_balance
+          from public.portfolio_ledger
+        `));
+        send(200, result.rows[0]);
+        return;
+      }
       if (url.pathname === "/__test/portfolio/nonzero" && request.method === "POST") {
         await withDatabase(async (instance) => {
           await instance.exec("begin; set local role authenticated;");
@@ -278,6 +293,28 @@ export async function startSupabaseAuthFixture(port, { onShutdown } = {}) {
             try {
               await instance.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ role: "service_role", is_anonymous: false })]);
               const result = await instance.query("select * from public.store_market_reference_quotes($1::jsonb)", [JSON.stringify(body.p_quotes)]);
+              await instance.exec("commit");
+              return result;
+            } catch (error) {
+              await instance.exec("rollback");
+              throw error;
+            }
+          });
+          send(200, result.rows);
+        } catch (error) {
+          send(error.code === "42501" ? 403 : 400, { code: error.code, message: error.message, details: null, hint: null });
+        }
+        return;
+      }
+      if (request.headers.apikey === TEST_SECRET_KEY && request.method === "POST"
+        && url.pathname === "/rest/v1/rpc/store_strategy_analysis_previews") {
+        const body = await readBody(request);
+        try {
+          const result = await withDatabase(async (instance) => {
+            await instance.exec("begin; set local role service_role;");
+            try {
+              await instance.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ role: "service_role", is_anonymous: false })]);
+              const result = await instance.query("select * from public.store_strategy_analysis_previews($1::uuid, $2::jsonb)", [body.p_owner_id, JSON.stringify(body.p_records)]);
               await instance.exec("commit");
               return result;
             } catch (error) {
@@ -414,6 +451,32 @@ export async function startSupabaseAuthFixture(port, { onShutdown } = {}) {
             try {
               await instance.query("select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)", [record.user.id, JSON.stringify(record.claims)]);
               const result = await instance.query("select * from public.get_latest_market_reference_quotes()");
+              await instance.exec("commit");
+              return result;
+            } catch (error) {
+              await instance.exec("rollback");
+              throw error;
+            }
+          });
+          send(200, result.rows);
+        } catch (error) {
+          send(error.code === "42501" ? 403 : 400, { code: error.code, message: error.message, details: null, hint: null });
+        }
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/rest/v1/rpc/get_latest_strategy_analysis_previews") {
+        const record = verifyToken(request.headers.authorization?.replace(/^Bearer\s+/i, ""));
+        if (!record) {
+          deny();
+          return;
+        }
+        const body = await readBody(request);
+        try {
+          const result = await withDatabase(async (instance) => {
+            await instance.exec("begin; set local role authenticated;");
+            try {
+              await instance.query("select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)", [record.user.id, JSON.stringify(record.claims)]);
+              const result = await instance.query("select * from public.get_latest_strategy_analysis_previews($1::uuid)", [body.p_owner_id]);
               await instance.exec("commit");
               return result;
             } catch (error) {

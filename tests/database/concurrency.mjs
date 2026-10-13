@@ -202,6 +202,47 @@ async function fundingFailureRetry() {
   console.log("PASS: native PostgreSQL funding failure rolls back portfolio and ledger; retry initializes once");
 }
 
+async function previewRace() {
+  const owner = randomUUID();
+  await sql(`insert into auth.users (id) values (${sqlLiteral(owner)}::uuid);
+    insert into public.portfolios (owner_id) values (${sqlLiteral(owner)}::uuid);`);
+  const payload = JSON.stringify([{
+    product_id: "BTC-EUR", strategy_id: "BASELINE_V1", calculation_version: "TECHNICAL_V1",
+    analysis_mode: "PREVIEW_ONLY", analysis_date: "2026-10-13", cutoff: "2026-10-13T00:00:00Z",
+    latest_candle_start: null, signal: "HOLD", indicators: null,
+    proposed_notional: null, proposed_quantity: null, explanation: "Insufficient history",
+    reason_codes: ["INSUFFICIENT_HISTORY"], data_quality: "INSUFFICIENT_HISTORY", freshness: "UNAVAILABLE",
+    input_count: 0, input_start: null, input_end: null, source: "Coinbase Advanced Trade public API",
+    ai_status: "NOT_REQUESTED", risk_status: "NOT_EVALUATED",
+    outcome: "ANALYSIS_ONLY", idempotency_key: "PREVIEW_ONLY:BASELINE_V1:BTC-EUR:2026-10-13T00:00:00.000Z",
+  }]);
+  const serviceSql = `set request.jwt.claims = ${sqlLiteral(JSON.stringify({ role: "service_role", is_anonymous: false }))}; set role service_role;`;
+  const callSql = `select 'PREVIEW:' || row_to_json(s)::text from public.store_strategy_analysis_previews(
+    ${sqlLiteral(owner)}::uuid, ${sqlLiteral(payload)}::jsonb) as s;`;
+  const first = session();
+  first.send(`begin;\n${serviceSql}\n${callSql}\nselect 'PREVIEW_FIRST_READY:' || pg_backend_pid();`);
+  const firstPid = Number((await first.waitFor("PREVIEW_FIRST_READY:")).split(":")[1]);
+  const initial = JSON.parse((await first.waitFor("PREVIEW:")).slice("PREVIEW:".length));
+  assert.deepEqual(initial, { inserted_count: 1, skipped_count: 0 });
+
+  const contenders = [session(), session()];
+  for (const contender of contenders) contender.end(`begin;\n${serviceSql}\nselect 'PREVIEW_CONTENDER_READY:' || pg_backend_pid();\n${callSql}\ncommit;\n\\q`);
+  const contenderPids = await Promise.all(contenders.map(async (contender) =>
+    Number((await contender.waitFor("PREVIEW_CONTENDER_READY:")).split(":")[1])));
+  assert.equal(new Set([firstPid, ...contenderPids]).size, 3);
+  await sleep(100);
+  assert.ok(contenders.every((contender) => !contender.finished), "preview retries must wait for the owner advisory lock");
+  first.end("commit;\n\\q");
+  await first.done;
+  const results = (await Promise.all(contenders.map((contender) => contender.done)))
+    .flatMap((lines) => lines.filter((line) => line.startsWith("PREVIEW:")).map((line) => JSON.parse(line.slice("PREVIEW:".length))));
+  assert.equal(results.length, 2);
+  for (const result of results) assert.deepEqual(result, { inserted_count: 0, skipped_count: 1 });
+  assert.equal(await sql(`select count(*) from public.strategy_analysis_runs where owner_id = ${sqlLiteral(owner)}::uuid;`), "1");
+  assert.equal(await sql(`select count(*) from public.portfolio_ledger where portfolio_id in (select id from public.portfolios where owner_id = ${sqlLiteral(owner)}::uuid);`), "0");
+  console.log("PASS: native PostgreSQL concurrent strategy previews persist once and create no ledger entries");
+}
+
 try {
   try { await Promise.all([run("initdb", ["--version"]), run("pg_ctl", ["--version"]), run("psql", ["--version"])]); }
   catch { throw new Error("Real PostgreSQL binaries unavailable. Set PG_TEST_BIN to a directory containing initdb, pg_ctl and psql; this check is never substituted with serialized PGlite."); }
@@ -229,7 +270,7 @@ try {
   }
   // Exercise the deployment acceptance scripts on native PostgreSQL as well
   // as PGlite; each script rolls back its synthetic owners and ledger rows.
-  for (const script of ["hosted-rls.sql", "hosted-portfolio.sql", "hosted-reference-quotes.sql"]) {
+  for (const script of ["hosted-rls.sql", "hosted-portfolio.sql", "hosted-reference-quotes.sql", "hosted-strategy-analysis.sql"]) {
     const result = await sql(await readFile(path.join(workspace, "tests/database", script), "utf8"));
     assert.match(result, /verification passed; all fixtures rolled back/);
     assert.equal(await sql("select count(*) from public.portfolios;"), "0");
@@ -239,6 +280,7 @@ try {
   await race("commit");
   await race("rollback");
   await fundingFailureRetry();
+  await previewRace();
   console.log("All real PostgreSQL concurrency/atomicity checks passed.");
 } finally {
   for (const child of children) child.kill();
