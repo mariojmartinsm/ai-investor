@@ -46,7 +46,8 @@ async function expectBalances(page: Page) {
   await expect(page.getByTestId("portfolio-btc")).toHaveText("0 BTC");
   await expect(page.getByTestId("portfolio-eth")).toHaveText("0 ETH");
   await expect(page.getByTestId("portfolio-pnl")).toHaveText("€0.00");
-  await expect(page.getByText("Persisted · Dry Run", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("portfolio-return")).toHaveText("0.00%");
+  await expect(page.getByText("Fresh valuation · Dry Run", { exact: true })).toBeVisible();
 }
 
 test.beforeEach(async ({ request }) => {
@@ -68,6 +69,7 @@ test("dashboard GET stays empty until explicit initialization creates exactly on
   expect(await statistics(request)).toMatchObject({ portfolios: 1, ledger_entries: 1, initial_funding_entries: 1, eur_balance: "500.000000000000" });
   await page.reload();
   await expectBalances(page);
+  expect(await statistics(request)).toMatchObject({ portfolios: 1, ledger_entries: 1, initial_funding_entries: 1, eur_balance: "500.000000000000", reference_quotes: 2 });
   await page.screenshot({ path: ".tmp/e2e-desktop-portfolio-ready.png", fullPage: true, style: "nextjs-portal { display: none !important; }" });
 });
 
@@ -114,6 +116,27 @@ test("logout and subsequent login retain persisted balances without re-funding",
   await login(page);
   await expectBalances(page);
   expect(await statistics(request)).toMatchObject({ portfolios: 1, ledger_entries: 1, initial_funding_entries: 1 });
+});
+
+test("nonzero BTC and ETH fixtures use persisted timestamped prices without changing ledger balances", async ({ page, request }) => {
+  const seeded = await request.post(`${authURL}/__test/portfolio/nonzero`);
+  expect(seeded.ok()).toBeTruthy();
+  const before = await statistics(request);
+  await login(page);
+  await expect(page.getByTestId("portfolio-total")).toHaveText("€505.01");
+  await expect(page.getByTestId("portfolio-eur")).toHaveText("€100.00");
+  await expect(page.getByTestId("portfolio-btc")).toHaveText("0.005 BTC");
+  await expect(page.getByTestId("portfolio-btc-value")).toHaveText("€325.00");
+  await expect(page.getByTestId("portfolio-eth")).toHaveText("0.025 ETH");
+  await expect(page.getByTestId("portfolio-eth-value")).toHaveText("€80.01");
+  await expect(page.getByTestId("portfolio-pnl")).toHaveText("€5.01");
+  await expect(page.getByTestId("portfolio-return")).toHaveText("+1.00%");
+  await expect(page.getByText("Public bid/ask observed; execution is not guaranteed.")).toHaveCount(2);
+  await expect(page.getByText("Realised P&L", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unrealised P&L", { exact: true })).toBeVisible();
+  const after = await statistics(request);
+  expect(after).toMatchObject({ portfolios: 1, ledger_entries: 4, initial_funding_entries: 1, eur_balance: "100.000000000000", reference_quotes: 2 });
+  expect(before).toMatchObject({ portfolios: 1, ledger_entries: 4, initial_funding_entries: 1, eur_balance: "100.000000000000" });
 });
 
 test("read errors show a generic retry state and do not create financial data", async ({ page, request }) => {

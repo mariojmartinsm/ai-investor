@@ -2,7 +2,7 @@
 
 AI Investor is a private Dry Run-only investment dashboard for a virtual EUR, BTC and ETH portfolio. It uses Next.js 16 App Router, strict TypeScript, Tailwind CSS, shadcn/ui and Supabase Auth.
 
-**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. **M2 adds read-only public BTC-EUR and ETH-EUR current quotes plus persistent validated daily history and closing-price charts** to `/markets`. Live mode remains locked and unavailable; the agent is not configured.
+**M1 portfolio initialization implements FR-010, initial FR-011 and initial FR-013** on top of authentication and the existing database foundation. The dashboard reads your own ledger-backed virtual EUR, BTC and ETH balances. An explicit setup action creates exactly one **€500.00 virtual EUR** funding entry, with zero BTC/ETH. **M2 adds read-only public BTC-EUR and ETH-EUR current quotes, persistent daily history, market charts and timestamped portfolio valuation**. Live mode remains locked and unavailable; the agent is not configured.
 
 ## Local setup
 
@@ -147,6 +147,30 @@ modify portfolio or ledger records. The forward migration
 advisor's Auth-helper optimization without changing access. See [M2 historical market-data acceptance](docs/M2_HISTORICAL_MARKET_DATA_ACCEPTANCE.md)
 for migration, backfill, validation and manual acceptance instructions.
 
+## Portfolio valuation: FR-012, FR-023, remaining FR-011 and initial FR-050
+
+Opening the authenticated dashboard refreshes the existing public Coinbase
+adapter, persists only validated fresh BTC-EUR/ETH-EUR observations through a
+server-only operation, and reads the persisted result back through RLS. A
+complete public bid/ask is identified as an observation, never a guaranteed
+fill. If either side is unavailable, the record is explicitly indicative and
+the application does not manufacture a spread.
+
+The dashboard marks nonzero BTC and ETH balances to the selected persisted
+last-trade price, falling back to Coinbase's product reference price only when
+the existing adapter has no valid trade. It displays per-asset EUR values,
+allocations, NAV, cumulative return and P&L, quote source, price time and
+freshness. Missing or stale marks for nonzero holdings withhold NAV. The current
+cash-only portfolio remains EUR 500 with EUR 0 P&L and 100% EUR allocation even
+if an informational crypto quote is unavailable.
+
+Realised and unrealised P&L remain explicitly unavailable until simulated fills
+and cost basis are implemented. Prices never mutate ledger balances. Migration
+`20261013211635_ai_006_market_reference_quotes.sql` adds append-only,
+idempotent reference storage with authenticated reads and service-role-only
+inserts. See [M2 portfolio valuation acceptance](docs/M2_PORTFOLIO_VALUATION_ACCEPTANCE.md)
+for the deterministic price policy, security model and deployment procedure.
+
 ## Login and session behavior
 
 Use `/login` with the manually provisioned email/password. Invalid credentials show a generic message. Login destinations are restricted to the seven workspace routes; supplied external URLs are ignored. Use **Log out** in the application header to end the current browser session.
@@ -222,8 +246,8 @@ app/(private)/  Existing workspace pages behind a server auth guard
 app/login/      Email/password login page and Server Action
 components/     Responsive shell, shared UI, auth/session components
 lib/auth/       Verified-user guard, safe redirects and logout action
-lib/portfolio/  Owner-scoped RPC services, validated ledger summaries and decimal formatting
-lib/markets/    Public Coinbase current/history adapters, validation, storage and cache
+lib/portfolio/  Owner-scoped balances, decimal-safe portfolio valuation and formatting
+lib/markets/    Public Coinbase current/history adapters, persisted references, validation and cache
 lib/supabase/   Browser/server clients, server-only admin client and proxy session refresh
 proxy.ts        Next.js 16 auth-refresh entry point
 supabase/       CLI config and version-controlled database migrations
@@ -246,9 +270,9 @@ After merging, return to `main`, run `git pull --ff-only origin main`, verify a 
 
 ## Current scope
 
-Authentication, the ledger-backed portfolio, read-only current Coinbase quotes, persistent validated daily history and closing-price charts are implemented. Agent, Trades, Performance and Settings remain placeholders. There is no AI analysis, scheduling, BUY/SELL functionality, browser secret-key client, live execution path or application deployment in the current scope.
+Authentication, the ledger-backed portfolio, timestamped market valuation, read-only current Coinbase quotes, persisted reference observations, validated daily history and closing-price charts are implemented. Agent, Trades, Performance and Settings remain placeholders. There is no AI analysis, scheduling, BUY/SELL functionality, browser secret-key client, live execution path or application deployment in the current scope.
 
-M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. M2 Phase 1 covers **FR-020 and partial FR-022/FR-024**, corresponding to AI-020. M2 Phase 2 covers **FR-021, remaining FR-022 candle validation, FR-025 and the market-price chart scope of FR-053**, corresponding to AI-021. The recommended next scope is the next separately approved PRD phase; trading-strategy work is not part of this delivery.
+M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the original plan's AI-015 initializer. The existing migration retains its AI-003 filename; original planning documents keep their original numbering. M2 Phase 1 covers **FR-020 and partial FR-022/FR-024**, corresponding to AI-020. M2 Phase 2 covers **FR-021, remaining FR-022 candle validation, FR-025 and the market-price chart scope of FR-053**, corresponding to AI-021. M2 Phase 3 covers **FR-012, FR-023, remaining FR-011 valuation and initial FR-050**, corresponding to AI-022 through AI-024. Simulated execution and trading-strategy work remain pending.
 
 ## Troubleshooting
 
@@ -260,6 +284,7 @@ M1 covers **FR-010, initial FR-011 and initial FR-013**, corresponding to the or
 - **Market data unavailable:** check outbound HTTPS access to `api.coinbase.com` and retry after the server cooldown. No Coinbase key is required. Invalid product/ticker responses fail validation; inspect sanitized error codes instead of bypassing guards.
 - **Stale market data:** retrieval or known last-trade age reached 120 seconds. Keep the tab visible for polling or refresh after the server cooldown. A reference price with unknown exchange time remains labeled as such; it is not evidence of an executable quote.
 - **Historical refresh unavailable:** confirm `SUPABASE_SECRET_KEY` (or the legacy service-role key) is configured only on the server and AI-004 is applied. Retry after provider cooldown. Inspect the owner-scoped import audit and visible gap count; never insert a fabricated candle to hide an upstream gap.
+- **Portfolio valuation unavailable:** a nonzero BTC/ETH holding lacks a fresh validated persisted mark. Check Coinbase connectivity, the server-only Supabase secret and AI-006. Do not substitute a stale price, zero or fabricated spread.
 - **Denied table reads/writes:** apply the migration, sign in and use the user's own portfolio. Financial writes are intentionally denied from browser roles. Do not weaken RLS or add service keys to resolve this.
 - **CLI access error:** ensure the CLI can access its user configuration directory and the selected project's database; never print credential-bearing connection strings in logs.
 - **Browser executable missing:** run `npx playwright install chromium`. The database/unit suite needs no browser or Docker.

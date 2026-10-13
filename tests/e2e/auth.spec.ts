@@ -46,7 +46,7 @@ test("all application pages redirect logged-out visitors without exposing portfo
   }
   await page.goto("/dashboard");
   await expect(page.getByRole("button", { name: "Log in", exact: true })).toBeVisible();
-  await expect(page.getByText("Virtual portfolio value", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Virtual portfolio NAV", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: /sign up|register/i })).toHaveCount(0);
 });
 
@@ -71,7 +71,7 @@ test("login, all private pages, reload and a second tab preserve an authenticate
   await page.goto("/dashboard");
   await expect(page.getByRole("button", { name: "Initialize virtual portfolio", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Initialize virtual portfolio", exact: true }).click();
-  await expect(page.getByText("Virtual portfolio value", { exact: true })).toBeVisible();
+  await expect(page.getByText("Virtual portfolio NAV", { exact: true })).toBeVisible();
   await expect(page.getByTestId("portfolio-total")).toHaveText("€500.00");
   await page.reload();
   await expect(page).toHaveURL(/\/dashboard$/);
@@ -101,7 +101,7 @@ test("a forged session cookie is rejected by the Auth server", async ({ page, co
   const before = await request.get(`${authURL}/__test/stats`).then((result) => result.json());
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login/);
-  await expect(page.getByText("Virtual portfolio value", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Virtual portfolio NAV", { exact: true })).toHaveCount(0);
   const after = await request.get(`${authURL}/__test/stats`).then((result) => result.json());
   expect(after.rejected).toBeGreaterThan(before.rejected);
 });

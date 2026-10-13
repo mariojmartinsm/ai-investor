@@ -229,7 +229,7 @@ try {
   }
   // Exercise the deployment acceptance scripts on native PostgreSQL as well
   // as PGlite; each script rolls back its synthetic owners and ledger rows.
-  for (const script of ["hosted-rls.sql", "hosted-portfolio.sql"]) {
+  for (const script of ["hosted-rls.sql", "hosted-portfolio.sql", "hosted-reference-quotes.sql"]) {
     const result = await sql(await readFile(path.join(workspace, "tests/database", script), "utf8"));
     assert.match(result, /verification passed; all fixtures rolled back/);
     assert.equal(await sql("select count(*) from public.portfolios;"), "0");

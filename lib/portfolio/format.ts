@@ -12,3 +12,13 @@ export function formatEur(value: string) {
 export function formatQuantity(value: string) {
   return parsePortfolioDecimal(value).toFixed(12).replace(/(\.\d*?[1-9])0+$|\.0+$/, "$1");
 }
+
+export function formatPercentage(value: string) {
+  const decimal = new PortfolioDecimal(value).toDecimalPlaces(2, PortfolioDecimal.ROUND_HALF_UP);
+  const sign = decimal.isZero() ? "" : decimal.isNegative() ? "−" : "+";
+  return `${sign}${decimal.abs().toFixed(2)}%`;
+}
+
+export function formatAllocation(value: string) {
+  return `${new PortfolioDecimal(value).toDecimalPlaces(2, PortfolioDecimal.ROUND_HALF_UP).toFixed(2)}%`;
+}
