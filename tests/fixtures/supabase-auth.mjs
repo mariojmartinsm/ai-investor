@@ -172,12 +172,35 @@ export async function startSupabaseAuthFixture(port, { onShutdown } = {}) {
       if (url.pathname === "/__test/portfolio/stats") {
         const result = await withDatabase((instance) => instance.query(`
           select (select count(*)::integer from public.portfolios) as portfolios,
+            (select count(*)::integer from public.market_reference_quotes) as reference_quotes,
             count(*)::integer as ledger_entries,
             count(*) filter (where transaction_type = 'INITIAL_CAPITAL')::integer as initial_funding_entries,
             coalesce(sum(amount) filter (where currency = 'EUR'), 0)::text as eur_balance
           from public.portfolio_ledger
         `));
         send(200, result.rows[0]);
+        return;
+      }
+      if (url.pathname === "/__test/portfolio/nonzero" && request.method === "POST") {
+        await withDatabase(async (instance) => {
+          await instance.exec("begin; set local role authenticated;");
+          try {
+            await instance.query("select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)", [ownerId, JSON.stringify({ sub: ownerId, role: "authenticated", is_anonymous: false })]);
+            await instance.query("select * from public.initialize_dry_run_portfolio($1::uuid)", [ownerId]);
+            await instance.exec("reset role");
+            const portfolio = await instance.query("select id from public.portfolios where owner_id = $1", [ownerId]);
+            await instance.query(`insert into public.portfolio_ledger
+              (portfolio_id, transaction_type, currency, amount, reference_type, reference_id, idempotency_key)
+              values ($1, 'TRADE', 'EUR', -400, 'E2E_FIXTURE', 'nonzero', 'E2E:EUR'),
+                     ($1, 'TRADE', 'BTC', 0.005, 'E2E_FIXTURE', 'nonzero', 'E2E:BTC'),
+                     ($1, 'TRADE', 'ETH', 0.025, 'E2E_FIXTURE', 'nonzero', 'E2E:ETH')`, [portfolio.rows[0].id]);
+            await instance.exec("commit");
+          } catch (error) {
+            await instance.exec("rollback");
+            throw error;
+          }
+        });
+        send(200, { seeded: true });
         return;
       }
       if (url.pathname === "/__test/markets/history/seed" && request.method === "POST") {
@@ -243,6 +266,28 @@ export async function startSupabaseAuthFixture(port, { onShutdown } = {}) {
           send(200, result.rows);
         } catch (error) {
           send(400, { code: error.code, message: error.message, details: null, hint: null });
+        }
+        return;
+      }
+      if (request.headers.apikey === TEST_SECRET_KEY && request.method === "POST"
+        && url.pathname === "/rest/v1/rpc/store_market_reference_quotes") {
+        const body = await readBody(request);
+        try {
+          const result = await withDatabase(async (instance) => {
+            await instance.exec("begin; set local role service_role;");
+            try {
+              await instance.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ role: "service_role", is_anonymous: false })]);
+              const result = await instance.query("select * from public.store_market_reference_quotes($1::jsonb)", [JSON.stringify(body.p_quotes)]);
+              await instance.exec("commit");
+              return result;
+            } catch (error) {
+              await instance.exec("rollback");
+              throw error;
+            }
+          });
+          send(200, result.rows);
+        } catch (error) {
+          send(error.code === "42501" ? 403 : 400, { code: error.code, message: error.message, details: null, hint: null });
         }
         return;
       }
@@ -344,6 +389,31 @@ export async function startSupabaseAuthFixture(port, { onShutdown } = {}) {
             try {
               await instance.query("select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)", [record.user.id, JSON.stringify(record.claims)]);
               const result = await instance.query("select * from public.get_market_candles($1, $2)", [body.p_product_id, body.p_limit]);
+              await instance.exec("commit");
+              return result;
+            } catch (error) {
+              await instance.exec("rollback");
+              throw error;
+            }
+          });
+          send(200, result.rows);
+        } catch (error) {
+          send(error.code === "42501" ? 403 : 400, { code: error.code, message: error.message, details: null, hint: null });
+        }
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/rest/v1/rpc/get_latest_market_reference_quotes") {
+        const record = verifyToken(request.headers.authorization?.replace(/^Bearer\s+/i, ""));
+        if (!record) {
+          deny();
+          return;
+        }
+        try {
+          const result = await withDatabase(async (instance) => {
+            await instance.exec("begin; set local role authenticated;");
+            try {
+              await instance.query("select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)", [record.user.id, JSON.stringify(record.claims)]);
+              const result = await instance.query("select * from public.get_latest_market_reference_quotes()");
               await instance.exec("commit");
               return result;
             } catch (error) {

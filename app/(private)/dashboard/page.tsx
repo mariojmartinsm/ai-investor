@@ -32,7 +32,7 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-5">
             <InitializePortfolioForm />
-            <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground"><FlaskConical aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />No real funds, market feeds, or trading are involved.</p>
+            <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground"><FlaskConical aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />No real funds or trading are involved. Public quotes never initialize or alter this portfolio.</p>
           </CardContent>
         </Card>
       )}

@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ requireUser: vi.fn(), rpc: vi.fn(), createServerSupabaseClient: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireUser: vi.fn(), rpc: vi.fn(), createServerSupabaseClient: vi.fn(), refreshQuotes: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/auth/user", () => ({ requireUser: mocks.requireUser }));
 vi.mock("@/lib/supabase/server", () => ({ createServerSupabaseClient: mocks.createServerSupabaseClient }));
+vi.mock("@/lib/markets/reference/server", () => ({ refreshAndLoadReferenceQuotes: mocks.refreshQuotes }));
 
 import { getDashboardPortfolio, initializePortfolio } from "@/lib/portfolio/server";
 
@@ -19,6 +20,10 @@ beforeEach(() => {
   mocks.requireUser.mockResolvedValue({ id: ownerId });
   mocks.createServerSupabaseClient.mockResolvedValue({ rpc: mocks.rpc });
   mocks.rpc.mockResolvedValue({ data: [row], error: null });
+  mocks.refreshQuotes.mockResolvedValue([
+    { product: "BTC-EUR", status: "unavailable", quote: null },
+    { product: "ETH-EUR", status: "unavailable", quote: null },
+  ]);
 });
 
 describe("independently authorized portfolio reads", () => {
@@ -27,17 +32,20 @@ describe("independently authorized portfolio reads", () => {
     expect(mocks.requireUser).toHaveBeenCalledOnce();
     expect(mocks.createServerSupabaseClient).toHaveBeenCalledWith();
     expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("get_dry_run_portfolio", { p_owner_id: ownerId });
+    expect(mocks.refreshQuotes).toHaveBeenCalledOnce();
     expect(mocks.requireUser.mock.invocationCallOrder[0]).toBeLessThan(mocks.rpc.mock.invocationCallOrder[0]);
   });
 
   it("shows the empty state only for a successful empty database result", async () => {
     mocks.rpc.mockResolvedValue({ data: [], error: null });
     expect(await getDashboardPortfolio()).toEqual({ status: "empty" });
+    expect(mocks.refreshQuotes).not.toHaveBeenCalled();
   });
 
   it("allows setup when an existing foundation portfolio has no ledger history", async () => {
     mocks.rpc.mockResolvedValue({ data: [{ ...row, eur_balance: "0", initial_funding_count: 0, ledger_entry_count: 0 }], error: null });
     expect(await getDashboardPortfolio()).toEqual({ status: "empty" });
+    expect(mocks.refreshQuotes).not.toHaveBeenCalled();
   });
 
   it.each([

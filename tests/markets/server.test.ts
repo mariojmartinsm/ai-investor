@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 const mocks = vi.hoisted(() => ({ requireUser: vi.fn(), get: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/auth/user", () => ({ requireUser: mocks.requireUser }));
-vi.mock("@/lib/markets/adapter", () => ({ createCoinbaseMarketAdapter: () => ({ get: mocks.get }) }));
+vi.mock("@/lib/markets/provider", () => ({ getPublicMarketSnapshots: () => Promise.all([mocks.get("BTC-EUR"), mocks.get("ETH-EUR")]) }));
 
 import { getMarketPageData, getMarkets } from "@/lib/markets/server";
 import { GET } from "@/app/(private)/markets/data/route";
